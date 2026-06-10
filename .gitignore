@@ -1,0 +1,60 @@
+# Python caches & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Local configuration & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.json
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Data exports & binaries
+*.parquet
+*.feather
+*.csv
+*.xlsx
+
+# Logs and temp files
+logs/
+*.log
+tmp/
+temp/
+
+# Artifacts
+artifacts/
+
+# ML/DL checkpoints and runs
+mlruns/
+checkpoints/
+models/
+.onnx
+
+# Testing & coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# IDE settings
+.vscode/
+.idea/
+
+# Distribution & Build
+dist/
+build/
+*.egg-info/

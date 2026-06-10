@@ -1,0 +1,75 @@
+# Econiq Core Platform: Behavioral Scoring & Transitions Policy Configuration
+
+trust:
+  purchase_weight: 0.50
+  payment_weight: 0.50
+
+state:
+  # Overall rating grade boundaries
+  class_a_threshold: 0.70
+  class_b_threshold: 0.55
+  class_c_threshold: 0.40
+
+  # behavioral state transition limits
+  elite_trust_threshold: 0.75
+  elite_stress_threshold: 0.15
+  active_trust_threshold: 0.45
+  active_stress_threshold: 0.35
+  declining_stress_threshold: 0.50
+
+  # Trajectory velocity ratios
+  accelerating_ratio: 1.5
+  growing_ratio: 1.1
+  declining_ratio: 0.8
+  collapsing_ratio: 0.5
+
+payment:
+  # Pillar subfactor weights (must sum to 1.0)
+  delay_weight: 0.25
+  consistency_weight: 0.15
+  partial_habit_weight: 0.10
+  clearance_weight: 0.15
+  weight_aging: 0.15
+  discipline_weight: 0.10
+  breach_weight: 0.10
+
+  # Delay score decay boundaries
+  delay_healthy_days: 30
+  delay_warning_days: 90
+  delay_critical_days: 180
+  delay_warning_score: 0.4
+
+  # Partial payment fragmentation limit
+  partial_habit_max_fragmentation: 2.5
+
+  # Individualized clearance
+  clearance_critical_ratio: 3.0
+
+  # Overdue bucket weights
+  aging_60_90_weight: 0.2
+  aging_90_120_weight: 0.5
+  aging_120p_weight: 1.0
+
+  # Outstanding pressure discipline scaling
+  discipline_scale_factor: 2.0
+
+  # Credit day breach limits
+  breach_expected_threshold: 60
+  breach_max_days: 120.0
+  breach_scaling_factor: 60.0
+
+  # Graduated evidence strength caps
+  evidence_caps:
+    - limit: 0.2
+      cap: 0.60
+    - limit: 0.4
+      cap: 0.75
+    - limit: 0.6
+      cap: 0.90
+
+stress:
+  customer_fault_weight: 1.0
+  genuine_fault_weight: 0.0
+  unknown_fault_weight: 0.8
+  stress_rg_weight: 0.8
+  stress_deficiency_weight: 0.2
