@@ -11,19 +11,19 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.auth.api_keys import router as api_keys_router
 from core.auth.routes import router as auth_router
-from core.customers.routes import customer_detail_router
-from core.customers.routes import router as customers_listing_router
-from core.dashboard.routes import router as dashboard_router
 from core.auth.users import router as users_router
 from core.config.settings import settings
 from core.core.exceptions import custom_http_exception_handler, global_exception_handler, validation_exception_handler
 from core.core.responses import success_response
+from core.customers.routes import customer_detail_router
+from core.customers.routes import router as customers_listing_router
+from core.dashboard.routes import router as dashboard_router
+from core.ingestion.sync_pipeline import SyncPipeline
 from core.intelligence.queue_worker import IntelligenceQueueWorker
 from core.middleware.security import HardenedSecurityMiddleware
 from core.models import auth_models, state_models  # noqa: F401
 from core.observability.logger import setup_logging
 from core.schemas.responses import StandardResponse
-from core.ingestion.sync_pipeline import SyncPipeline
 from core.storage.postgres import AsyncSessionLocal, Base, engine
 from core.storage.redis import redis_manager
 

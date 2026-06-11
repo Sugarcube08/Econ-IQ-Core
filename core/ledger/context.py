@@ -75,13 +75,26 @@ class LedgerContextService:
                 "payment_mode": None,
                 "batch_id": None,
                 "behavioral_penalty_weight": None,
+                "product_category": None,
+                "product_name": None,
+                "quantity": None,
+                "tax_amount": None,
+                "unit_price": None,
+                "business_type": None,
+                "registration_date": None,
+                "credit_limit": None,
+                "payment_terms_days": None,
+                "return_reason": None,
             }
             if r.metadata_:
                 for k, v in r.metadata_.items():
-                    if k == "discount_amount":
+                    if k in [
+                        "discount_amount", "quantity", "tax_amount", 
+                        "unit_price", "credit_limit", "payment_terms_days"
+                    ]:
                         d[k] = float(v) if v is not None else 0.0
-                    elif k == "rg_responsibility":
-                        d[k] = str(v) if v is not None else ""
+                    elif k == "registration_date":
+                        d[k] = date.fromisoformat(v) if v is not None else None
                     else:
                         d[k] = v
             dicts.append(d)

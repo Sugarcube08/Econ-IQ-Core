@@ -1,7 +1,10 @@
 import os
+
 import yaml
 from loguru import logger
+
 from core.policy.models import EconiqPolicy
+
 
 class PolicyManager:
     def __init__(self, config_path: str = "policy.yaml"):
@@ -14,7 +17,7 @@ class PolicyManager:
             return EconiqPolicy()
         
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             
             policy = EconiqPolicy.model_validate(data)

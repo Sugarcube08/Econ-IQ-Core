@@ -83,6 +83,16 @@ class LedgerService:
             "rg_responsibility",
             "batch_id",
             "behavioral_penalty_weight",
+            "product_category",
+            "product_name",
+            "quantity",
+            "tax_amount",
+            "unit_price",
+            "business_type",
+            "registration_date",
+            "credit_limit",
+            "payment_terms_days",
+            "return_reason",
         ]
         batch_events = batch_events.with_columns(
             pl.struct([c for c in metadata_cols if c in batch_events.columns]).alias("metadata")

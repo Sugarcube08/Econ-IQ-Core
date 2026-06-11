@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 
+
 class TrustPolicy(BaseModel):
     purchase_weight: float = Field(0.50, description="Weight of purchase behavior score")
     payment_weight: float = Field(0.50, description="Weight of payment behavior score")

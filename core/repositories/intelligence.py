@@ -59,6 +59,38 @@ class IntelligenceRepository:
 
         intelligence.last_updated = datetime.now(UTC)
 
+        # Also update customers.behavioral_profile if the customers table exists
+        try:
+            import uuid
+
+            from sqlalchemy import MetaData, Table, update
+            metadata = MetaData()
+            customers_tbl = await self.db.run_sync(
+                lambda sync_conn: Table("customers", metadata, autoload_with=sync_conn.bind)
+            )
+            # Storing scores in behavioral_profile
+            profile_payload = {
+                "trust_score": intelligence_data.get("trust_score"),
+                "purchase_score": intelligence_data.get("purchase_score"),
+                "payment_score": intelligence_data.get("payment_score"),
+                "rg_score": intelligence_data.get("rg_score"),
+                "state": intelligence_data.get("state"),
+                "outstanding_current": intelligence_data.get("outstanding_current"),
+                "contribution_current": intelligence_data.get("contribution_current"),
+                # v2 score profiles
+                "v2_scores": intelligence_data.get("v2_scores", {}),
+                "last_updated": datetime.now(UTC).isoformat()
+            }
+            stmt_cust = (
+                update(customers_tbl)
+                .where(customers_tbl.c.id == uuid.UUID(customer_id))
+                .values(behavioral_profile=self._sanitize_for_json(profile_payload))
+            )
+            await self.db.execute(stmt_cust)
+        except Exception as e:
+            logger.warning(f"Could not update customers.behavioral_profile for {customer_id}: {e}")
+
+
     async def get_timeline(self, customer_id: str) -> list[dict]:
         """
         Fetches the fresh event ledger from PostgreSQL.

@@ -6,22 +6,32 @@ from sqlalchemy import select
 
 from core.feature_store.engineer import FeatureEngineer
 from core.intelligence.cadence.engine import CadenceEngine
-from core.intelligence.causal.engine import CausalDiagnosisEngine
 from core.intelligence.confidence.engine import ConfidenceEngine
+
+# V2 Dimension Engines
+from core.intelligence.dimensions.activity import ActivityDimensionEngine
+from core.intelligence.dimensions.credit import CreditDimensionEngine
+from core.intelligence.dimensions.discipline import DisciplineDimensionEngine
+from core.intelligence.dimensions.friction import FrictionDimensionEngine
+from core.intelligence.dimensions.growth import GrowthDimensionEngine
+from core.intelligence.dimensions.product import ProductDimensionEngine
+from core.intelligence.dimensions.relationship import RelationshipDimensionEngine
+from core.intelligence.dimensions.stability import StabilityDimensionEngine
+from core.intelligence.dimensions.value import ValueDimensionEngine
+from core.intelligence.dimensions.concentration import ConcentrationDimensionEngine
+from core.intelligence.dimensions.payment_mode import PaymentModeDimensionEngine
+from core.intelligence.dimensions.maturity import MaturityDimensionEngine
+
 from core.intelligence.exposure.pressure import ExposurePressureEngine
 from core.intelligence.ledger.reconstruction import LedgerReconstructionEngine
-from core.intelligence.payment.behavior import PaymentBehaviorEngine
+from core.intelligence.meta.scores import MetaScoreEngine
 from core.intelligence.payment.rhythm import PaymentRhythmEngine
-from core.intelligence.rg.engine import RGBehaviorEngine
 from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.intelligence.states.engine import StateEngine
 from core.intelligence.stress.engine import StressEngine
+from core.intelligence.relationship.engine import RelationshipEngine
+from core.intelligence.resilience.engine import ResilienceEngine
 from core.intelligence.trade.consistency import TradeConsistencyEngine
-from core.intelligence.trade.potential import TradePotentialEngine
-from core.intelligence.trade.profile import TradeProfileEngine
-from core.intelligence.trade.purchase import PurchaseBehaviorEngine
-from core.intelligence.transitions.engine import TransitionEngine
-from core.intelligence.trust.engine import TrustEngine
 from core.intelligence.validator import IntelligenceIntegrityValidator
 from core.ledger.context import LedgerContextService
 from core.repositories.intelligence import IntelligenceRepository
@@ -33,47 +43,51 @@ class IntelligenceOrchestrator:
     def __init__(self):
         self.feature_engineer = FeatureEngineer()
         self.cadence_engine = CadenceEngine()
-        self.stress_engine = StressEngine()
 
-        # Next-Gen Engines
         self.ledger_reconstruction = LedgerReconstructionEngine()
         self.settlement_engine = SettlementMatchingEngine()
         self.payment_rhythm = PaymentRhythmEngine()
         self.exposure_pressure = ExposurePressureEngine()
         self.trade_consistency = TradeConsistencyEngine()
-        self.trade_potential = TradePotentialEngine()
-        self.trade_profile = TradeProfileEngine()
 
-        # Multidimensional Behavioral Engines
-        self.purchase_behavior = PurchaseBehaviorEngine()
-        self.payment_behavior = PaymentBehaviorEngine()
-        self.rg_behavior = RGBehaviorEngine()
-
-        self.trust_engine = TrustEngine()
-        self.state_engine = StateEngine()
         self.confidence_engine = ConfidenceEngine()
-        self.transition_engine = TransitionEngine()
-        self.causal_engine = CausalDiagnosisEngine()
         self.ledger_context = LedgerContextService()
         self.validator = IntelligenceIntegrityValidator()
+
+        # V2 Dimensions
+        self.dim_activity = ActivityDimensionEngine()
+        self.dim_discipline = DisciplineDimensionEngine()
+        self.dim_credit = CreditDimensionEngine()
+        self.dim_relationship = RelationshipDimensionEngine()
+        self.dim_product = ProductDimensionEngine()
+        self.dim_friction = FrictionDimensionEngine()
+        self.dim_growth = GrowthDimensionEngine()
+        self.dim_stability = StabilityDimensionEngine()
+        self.dim_value = ValueDimensionEngine()
+        self.dim_concentration = ConcentrationDimensionEngine()
+        self.dim_payment_mode = PaymentModeDimensionEngine()
+        self.dim_maturity = MaturityDimensionEngine()
+        
+        self.meta_scores = MetaScoreEngine()
+        self.state_engine = StateEngine()
+        
+        self.stress_engine = StressEngine()
+        self.relationship_engine = RelationshipEngine()
+        self.resilience_engine = ResilienceEngine()
 
     def compute_intelligence(
         self, runtime_df: pl.DataFrame, context: AnalysisContext, org_metrics: dict | None = None, customer_avg_billing: dict | None = None
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
         """Core intelligence computation shared by batch and dynamic execution."""
-        # MANDATORY: Sort chronologically for rolling windows
         runtime_df = runtime_df.sort(["customer_id", "event_date"])
 
-        # Filter out future events beyond end_date if provided
         if context.end_date:
             runtime_df = runtime_df.filter(pl.col("event_date").dt.date() <= context.end_date)
 
         # 2. Component Computation
-        # Outstanding is the ONLY place where is_ok=0 logic is applied
         runtime_df_fin = runtime_df.filter(pl.col("is_ok") == 0)
         exposure_df_fin = self.ledger_reconstruction.reconstruct_exposure(runtime_df_fin, context)
 
-        # All other engines use ALL events (ignoring is_ok)
         features_df = self.feature_engineer.compute_features(runtime_df, context)
         cadence_df = self.cadence_engine.compute(runtime_df, context)
         exposure_df_all = self.ledger_reconstruction.reconstruct_exposure(runtime_df, context)
@@ -83,42 +97,80 @@ class IntelligenceOrchestrator:
         consistency_df = self.trade_consistency.compute_consistency(runtime_df, cadence_df, context)
 
         conf_df = self.confidence_engine.compute(features_df, context, org_metrics=org_metrics)
+
+        # Inject date column into settlement and pressure dataframes for dimensional engine compatibility
+        if not features_df.is_empty():
+            latest_dates = features_df.select(["customer_id", "date"])
+            if not settlement_df_all.is_empty() and "date" not in settlement_df_all.columns:
+                settlement_df_all = settlement_df_all.join(latest_dates, on="customer_id", how="left")
+            if not pressure_df_all.is_empty() and "date" not in pressure_df_all.columns:
+                pressure_df_all = pressure_df_all.join(latest_dates, on="customer_id", how="left")
+
+        # 3. V2 Dimensions
+        dim_activity_df = self.dim_activity.compute(features_df)
+        dim_discipline_df = self.dim_discipline.compute(settlement_df_all, rhythm_df_all)
+        dim_credit_df = self.dim_credit.compute(pressure_df_all)
+        dim_relationship_df = self.dim_relationship.compute(features_df, consistency_df)
+        dim_product_df = self.dim_product.compute(features_df)
+        dim_friction_df = self.dim_friction.compute(features_df)
+        dim_growth_df = self.dim_growth.compute(features_df)
+        dim_stability_df = self.dim_stability.compute(features_df, consistency_df)
+        dim_value_df = self.dim_value.compute(features_df)
+        dim_concentration_df = self.dim_concentration.compute(features_df)
+        dim_payment_mode_df = self.dim_payment_mode.compute(features_df)
+        dim_maturity_df = self.dim_maturity.compute(features_df)
+
+        # Base frame
+        dimensions_df = features_df.select(["customer_id", "date"])
+
+        # Join all dimensions
+        for dim_df in [
+            dim_activity_df, dim_discipline_df, dim_credit_df, 
+            dim_relationship_df, dim_product_df, dim_friction_df, 
+            dim_growth_df, dim_stability_df, dim_value_df,
+            dim_concentration_df, dim_payment_mode_df, dim_maturity_df
+        ]:
+            if not dim_df.is_empty():
+                dimensions_df = dimensions_df.join(dim_df, on=["customer_id", "date"], how="left")
+
+        # 4. Meta Scores
+        meta_scores_df = self.meta_scores.compute(dimensions_df)
+
+        # 5. State Inference
+        states_df = self.state_engine.compute(features_df, meta_scores_df, context)
+
+        # 6. Assemble Final Dataframe
+        states_df = states_df.join(meta_scores_df, on=["customer_id", "date"], how="left")
+        states_df = states_df.join(dimensions_df.drop(["date"]), on=["customer_id"], how="left")
+
+        # 7. Compute Relationship and Resilience Engines
+        relationship_df = self.relationship_engine.compute(features_df, consistency_df)
         stress_df = self.stress_engine.compute(features_df)
+        resilience_df = self.resilience_engine.compute(features_df, stress_df, rhythm_df_all, consistency_df)
 
-        # 3. Multidimensional Behavioral Scoring (Deterministic Pillars)
-        purchase_df = self.purchase_behavior.compute_score(features_df, consistency_df, context, org_metrics=org_metrics)
-        payment_df = self.payment_behavior.compute_score(settlement_df_all, rhythm_df_all, pressure_df_all, context, customer_avg_billing=customer_avg_billing)
-        rg_df = self.rg_behavior.compute_score(features_df, context)
-        
-        # Telemetry: Log Confidence Cap Distribution
-        if not payment_df.is_empty():
-            cap_60 = payment_df.filter(pl.col("evidence_strength") < 0.2).height
-            cap_75 = payment_df.filter((pl.col("evidence_strength") >= 0.2) & (pl.col("evidence_strength") < 0.4)).height
-            cap_90 = payment_df.filter((pl.col("evidence_strength") >= 0.4) & (pl.col("evidence_strength") < 0.6)).height
-            total = payment_df.height
-            logger.debug(f"Confidence Cap Telemetry | Total: {total} | <0.2 (0.60 cap): {cap_60} ({cap_60/total:.1%}) | <0.4 (0.75 cap): {cap_75} ({cap_75/total:.1%}) | <0.6 (0.90 cap): {cap_90} ({cap_90/total:.1%})")
+        # Join Relationship and Resilience Scores
+        if not relationship_df.is_empty():
+            states_df = states_df.join(relationship_df.drop(["date"]), on="customer_id", how="left")
+        if not resilience_df.is_empty():
+            states_df = states_df.join(resilience_df.drop(["date"]), on="customer_id", how="left")
 
-        # Trust Engine (Behavioral Fusion: Purchase 50%, Payment 50%)
-        trust_df = self.trust_engine.compute(purchase_df, payment_df)
-
-        # 4. State Inference (Behavioral Context)
-        states_df = self.state_engine.compute(
-            features_df,
-            cadence_df,
-            stress_df,
-            trust_df,
-            settlement_df_all,
-            pressure_df_all,
-            rhythm_df_all,
-            consistency_df,
-            conf_df,
-            context,
+        # Add backward-compatible fields mapping (to avoid breaking current UI/API schemas)
+        states_df = states_df.with_columns(
+            pl.col("growth_score").alias("purchase_behavior_score"),
+            pl.col("risk_score").alias("rg_rate_score"),
+            pl.col("trust_score").alias("payment_behavior_score"),
+            pl.lit(0.0).alias("raw_rg_amount"),
         )
+        
+        if "resilience_score" not in states_df.columns:
+            states_df = states_df.with_columns(pl.lit(0.0).alias("resilience_score"))
+        else:
+            states_df = states_df.with_columns(pl.col("resilience_score").fill_null(0.0))
 
-        # Realigned columns selection
-        states_df = states_df.select(["customer_id", "date", "behavioral_state", "overall_class"])
-        states_df = states_df.join(trust_df.select(["customer_id", "date", "trust_score"]), on=["customer_id", "date"], how="left")
-        states_df = states_df.join(purchase_df.select(["customer_id", "date", "purchase_behavior_score"]), on=["customer_id", "date"], how="left")
+        if "relationship_score" not in states_df.columns:
+            states_df = states_df.with_columns(pl.lit(0.0).alias("relationship_score"))
+        else:
+            states_df = states_df.with_columns(pl.col("relationship_score").fill_null(0.0))
         
         # MANDATORY: Join FINANCIAL exposure (is_ok=0) for outstanding balance reporting
         states_df = states_df.sort(["customer_id", "date"]).with_columns(pl.col("date").cast(pl.Date).set_sorted())
@@ -138,27 +190,12 @@ class IntelligenceOrchestrator:
         states_df = states_df.with_columns(
             pl.col("outstanding_balance").forward_fill().over("customer_id").fill_null(0.0)
         )
-        
-        # Join payment and rg
-        states_df = states_df.join(payment_df.select(["customer_id", "payment_behavior_score"]), on="customer_id", how="left")
-        states_df = states_df.join(rg_df.select(["customer_id", "date", "rg_rate_score", "raw_rg_amount"]), on=["customer_id", "date"], how="left")
 
         # Join last_purchased_at from features_df
         states_df = states_df.join(
             features_df.select(["customer_id", "date", "last_purchased_at"]),
             on=["customer_id", "date"],
             how="left"
-        )
-
-        # Fill nulls for safety and rename columns to match the simplified schema
-        states_df = states_df.with_columns(
-            [
-                pl.col("trust_score").fill_null(0.0),
-                pl.col("purchase_behavior_score").fill_null(0.0),
-                pl.col("payment_behavior_score").fill_null(0.0),
-                pl.col("rg_rate_score").fill_null(0.0),
-                pl.col("raw_rg_amount").fill_null(0.0),
-            ]
         )
 
         # Integrity Validation
@@ -175,12 +212,12 @@ class IntelligenceOrchestrator:
         df = df.with_columns(
             pl.struct(
                 [
-                    "purchase_behavior_score",
-                    "payment_behavior_score",
-                    "rg_rate_score",
-                    "avg_repayment_days",
-                    "trade_regularity_score",
-                    "clearance_strength",
+                    "dim_activity",
+                    "dim_discipline",
+                    "trust_score",
+                    "dim_credit",
+                    "dim_friction",
+                    "dim_stability",
                 ]
             )
             .map_elements(
@@ -189,21 +226,21 @@ class IntelligenceOrchestrator:
                     for d, v in [
                         (
                             "HIGH_TRADE_REGULARITY",
-                            x["purchase_behavior_score"] is not None and x["purchase_behavior_score"] > 0.8,
+                            x["dim_activity"] is not None and x["dim_activity"] > 0.8,
                         ),
-                        ("FAST_SETTLEMENT", x["avg_repayment_days"] is not None and x["avg_repayment_days"] <= 60),
+                        ("FAST_SETTLEMENT", x["dim_discipline"] is not None and x["dim_discipline"] > 0.8),
                         (
                             "ELITE_LIQUIDITY",
-                            x["payment_behavior_score"] is not None and x["payment_behavior_score"] > 0.85,
+                            x["trust_score"] is not None and x["trust_score"] > 0.85,
                         ),
                         (
                             "STRONG_DEBT_CLEARANCE",
-                            x["clearance_strength"] is not None and x["clearance_strength"] > 0.8,
+                            x["dim_credit"] is not None and x["dim_credit"] > 0.8,
                         ),
-                        ("LOW_CUSTOMER_RG", x["rg_rate_score"] is not None and x["rg_rate_score"] < 0.1),
+                        ("LOW_CUSTOMER_RG", x["dim_friction"] is not None and x["dim_friction"] > 0.9),
                         (
                             "STABLE_PARTICIPATION",
-                            x["trade_regularity_score"] is not None and x["trade_regularity_score"] > 0.7,
+                            x["dim_stability"] is not None and x["dim_stability"] > 0.7,
                         ),
                     ]
                     if v
@@ -217,38 +254,36 @@ class IntelligenceOrchestrator:
         df = df.with_columns(
             pl.struct(
                 [
-                    "purchase_behavior_score",
-                    "payment_behavior_score",
-                    "rg_rate_score",
-                    "avg_repayment_days",
-                    "stress_score",
-                    "clearance_strength",
-                    "unresolved_exposure_ratio",
+                    "dim_activity",
+                    "dim_discipline",
+                    "risk_score",
+                    "dim_credit",
+                    "dim_friction",
                 ]
             )
             .map_elements(
                 lambda x: [
                     d
                     for d, v in [
-                        ("SLOW_SETTLEMENT", x["avg_repayment_days"] is not None and x["avg_repayment_days"] > 90),
-                        ("HIGH_OPERATIONAL_FRICTION", x["rg_rate_score"] is not None and x["rg_rate_score"] > 0.4),
+                        ("SLOW_SETTLEMENT", x["dim_discipline"] is not None and x["dim_discipline"] < 0.4),
+                        ("HIGH_OPERATIONAL_FRICTION", x["dim_friction"] is not None and x["dim_friction"] < 0.6),
                         (
                             "LIQUIDITY_STRESS",
-                            x["payment_behavior_score"] is not None and x["payment_behavior_score"] < 0.4,
+                            x["risk_score"] is not None and x["risk_score"] < 0.4,
                         ),
                         (
                             "CHRONIC_DEBT_PRESSURE",
-                            x["unresolved_exposure_ratio"] is not None and x["unresolved_exposure_ratio"] > 0.7,
+                            x["dim_credit"] is not None and x["dim_credit"] < 0.3,
                         ),
                         (
                             "WEAK_CLEARANCE_STRENGTH",
-                            x["clearance_strength"] is not None and x["clearance_strength"] < 0.4,
+                            x["dim_credit"] is not None and x["dim_credit"] < 0.4,
                         ),
                         (
                             "INCONSISTENT_TRADING",
-                            x["purchase_behavior_score"] is not None and x["purchase_behavior_score"] < 0.3,
+                            x["dim_activity"] is not None and x["dim_activity"] < 0.3,
                         ),
-                        ("CRITICAL_BEHAVIORAL_STRESS", x["stress_score"] is not None and x["stress_score"] > 0.7),
+                        ("CRITICAL_BEHAVIORAL_STRESS", x["risk_score"] is not None and x["risk_score"] < 0.3),
                     ]
                     if v
                 ],
@@ -304,6 +339,7 @@ class IntelligenceOrchestrator:
             cities_map = {}
             try:
                 import uuid
+
                 from sqlalchemy import MetaData, Table
                 _metadata = MetaData()
                 customers_tbl = await session.run_sync(
@@ -361,6 +397,13 @@ class IntelligenceOrchestrator:
                                 "contribution_previous": 0.0,
                                 "outstanding_previous": 0.0,
                                 "last_purchase_date": None,
+                                "v2_scores": {
+                                    "growth_score": 0.0,
+                                    "risk_score": 0.0,
+                                    "relationship_score": 0.0,
+                                    "resilience_score": 0.0,
+                                    "opportunity_score": 0.0,
+                                }
                             }
                             await repo.persist_intelligence(intel_data)
                             continue
@@ -414,6 +457,30 @@ class IntelligenceOrchestrator:
                             "contribution_previous": prev_contrib,
                             "outstanding_previous": prev_outstanding,
                             "last_purchase_date": last_purchase_date,
+                            "v2_scores": {
+                                "growth_score": curr_row.get("growth_score", 0.0),
+                                "risk_score": curr_row.get("risk_score", 0.0),
+                                "relationship_score": curr_row.get("relationship_score", 0.0),
+                                "resilience_score": curr_row.get("resilience_score", 0.0),
+                                "opportunity_score": curr_row.get("opportunity_score", 0.0),
+                                "health_score": curr_row.get("health_score", 0.0),
+                                "strategic_value_score": curr_row.get("strategic_value_score", 0.0),
+                                "stability_score": curr_row.get("stability_score", 0.0),
+                                "dimensions": {
+                                    "activity": curr_row.get("dim_activity", 0.0),
+                                    "discipline": curr_row.get("dim_discipline", 0.0),
+                                    "credit": curr_row.get("dim_credit", 0.0),
+                                    "relationship": curr_row.get("dim_relationship", 0.0),
+                                    "product": curr_row.get("dim_product", 0.0),
+                                    "friction": curr_row.get("dim_friction", 0.0),
+                                    "growth": curr_row.get("dim_growth", 0.0),
+                                    "stability": curr_row.get("dim_stability", 0.0),
+                                    "value": curr_row.get("dim_value", 0.0),
+                                    "concentration": curr_row.get("dim_concentration", 0.0),
+                                    "payment_mode": curr_row.get("dim_payment_mode", 0.0),
+                                    "maturity": curr_row.get("dim_maturity", 0.0),
+                                }
+                            }
                         }
 
                         await repo.persist_intelligence(intel_data)

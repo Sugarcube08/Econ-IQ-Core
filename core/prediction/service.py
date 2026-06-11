@@ -1,7 +1,6 @@
-import time
 from datetime import UTC, datetime
+
 import polars as pl
-from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.feature_store.engineer import FeatureEngineer
@@ -9,11 +8,11 @@ from core.ledger.context import LedgerContextService
 from core.prediction.interfaces import IModelEstimator
 from core.schemas.intelligence import AnalysisContext
 from core.schemas.prediction import (
-    RiskPrediction,
-    GrowthPrediction,
-    HealthPrediction,
     ChurnPrediction,
     CollectionPrediction,
+    GrowthPrediction,
+    HealthPrediction,
+    RiskPrediction,
 )
 
 

@@ -119,26 +119,33 @@ class DBIngestionProvider:
 
     def _normalize_sales(self, df: pl.DataFrame) -> pl.DataFrame:
         is_ok_expr = pl.col("is_ok").fill_null(0).cast(pl.Int32) if "is_ok" in df.columns else pl.lit(0).cast(pl.Int32).alias("is_ok")
-        return df.select(
-            [
-                pl.col("customer_id").cast(pl.Utf8),
-                pl.lit("SALE").alias("event_type"),
-                pl.coalesce(
-                    [
-                        self._parse_date_column(df, "invoice_date"),
-                        self._parse_date_column(df, "created_at"),
-                    ]
-                ).alias("event_date"),
-                pl.col("invoice_amount").alias("amount").fill_null(0.0).cast(pl.Float64),
-                pl.col("discount_amount").alias("discount_amount").fill_null(0.0).cast(pl.Float64),
-                is_ok_expr,
-                pl.lit(None).alias("rg_responsibility").cast(pl.Utf8),
-                pl.lit(None).alias("payment_mode").cast(pl.Utf8),
-                pl.lit(None).alias("bank_name").cast(pl.Utf8),
-                pl.lit("raw_sales").alias("source_table"),
-                pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
-            ]
-        ).pipe(self._add_event_uid)
+        
+        # Pull extra signals if they exist
+        extra_cols = ["product_category", "product_name", "quantity", "unit_price", "tax_amount"]
+        select_list = [
+            pl.col("customer_id").cast(pl.Utf8),
+            pl.lit("SALE").alias("event_type"),
+            pl.coalesce(
+                [
+                    self._parse_date_column(df, "invoice_date"),
+                    self._parse_date_column(df, "created_at"),
+                ]
+            ).alias("event_date"),
+            pl.col("invoice_amount").alias("amount").fill_null(0.0).cast(pl.Float64),
+            pl.col("discount_amount").alias("discount_amount").fill_null(0.0).cast(pl.Float64),
+            is_ok_expr,
+            pl.lit(None).alias("rg_responsibility").cast(pl.Utf8),
+            pl.lit(None).alias("payment_mode").cast(pl.Utf8),
+            pl.lit(None).alias("bank_name").cast(pl.Utf8),
+            pl.lit("raw_sales").alias("source_table"),
+            pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
+        ]
+        
+        for col in extra_cols:
+            if col in df.columns:
+                select_list.append(pl.col(col))
+        
+        return df.select(select_list).pipe(self._add_event_uid)
 
     def _normalize_payments(self, df: pl.DataFrame) -> pl.DataFrame:
         # 1. Base payment events
@@ -156,8 +163,8 @@ class DBIngestionProvider:
                 pl.lit(0.0).alias("discount_amount").cast(pl.Float64),
                 pl.lit(0).alias("is_ok").cast(pl.Int32),
                 pl.lit(None).alias("rg_responsibility").cast(pl.Utf8),
-                pl.col("payment_mode").cast(pl.Utf8),
-                pl.lit(None).alias("bank_name").cast(pl.Utf8),
+                pl.col("payment_mode").cast(pl.Utf8) if "payment_mode" in df.columns else pl.lit(None).alias("payment_mode").cast(pl.Utf8),
+                pl.col("bank_name").cast(pl.Utf8) if "bank_name" in df.columns else pl.lit(None).alias("bank_name").cast(pl.Utf8),
                 pl.lit("raw_payments").alias("source_table"),
                 pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
             ]
@@ -169,22 +176,30 @@ class DBIngestionProvider:
         Generates OPENING_BALANCE events from customers.
         These act as the initial financial position for the ledger.
         """
-        return df.select(
-            [
-                pl.col("id").cast(pl.Utf8).alias("customer_id"),
-                pl.lit("OPENING_BALANCE").alias("event_type"),
-                # Anchor at a very early date to ensure it is the first event
-                pl.lit("2000-01-01").str.to_date("%Y-%m-%d").alias("event_date"),
-                pl.lit(0.0).alias("amount").cast(pl.Float64),
-                pl.lit(0.0).alias("discount_amount").cast(pl.Float64),
-                pl.lit(0).alias("is_ok").cast(pl.Int32),
-                pl.lit(None).alias("rg_responsibility").cast(pl.Utf8),
-                pl.lit(None).alias("payment_mode").cast(pl.Utf8),
-                pl.lit(None).alias("bank_name").cast(pl.Utf8),
-                pl.lit("customers").alias("source_table"),
-                pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
-            ]
-        ).pipe(self._add_event_uid)
+        extra_cols = ["business_type", "registration_date", "credit_limit", "payment_terms_days"]
+        select_list = [
+            pl.col("id").cast(pl.Utf8).alias("customer_id"),
+            pl.lit("OPENING_BALANCE").alias("event_type"),
+            # Anchor at a very early date to ensure it is the first event
+            pl.lit("2000-01-01").str.to_date("%Y-%m-%d").alias("event_date"),
+            pl.lit(0.0).alias("amount").cast(pl.Float64),
+            pl.lit(0.0).alias("discount_amount").cast(pl.Float64),
+            pl.lit(0).alias("is_ok").cast(pl.Int32),
+            pl.lit(None).alias("rg_responsibility").cast(pl.Utf8),
+            pl.lit(None).alias("payment_mode").cast(pl.Utf8),
+            pl.lit(None).alias("bank_name").cast(pl.Utf8),
+            pl.lit("customers").alias("source_table"),
+            pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
+        ]
+        
+        for col in extra_cols:
+            if col in df.columns:
+                if col == "registration_date":
+                    select_list.append(self._parse_date_column(df, col).alias(col))
+                else:
+                    select_list.append(pl.col(col))
+        
+        return df.select(select_list).pipe(self._add_event_uid)
 
     def _normalize_rg(self, df: pl.DataFrame) -> pl.DataFrame:
         # Standardize returns responsibility based on return_reason
@@ -201,26 +216,29 @@ class DBIngestionProvider:
         else:
             df = df.with_columns(pl.lit("GENUINE").alias("rg_responsibility"))
 
-        return df.select(
-            [
-                pl.col("customer_id").cast(pl.Utf8),
-                pl.lit("RETURN").alias("event_type"),
-                pl.coalesce(
-                    [
-                        self._parse_date_column(df, "return_date"),
-                        self._parse_date_column(df, "created_at"),
-                    ]
-                ).alias("event_date"),
-                pl.col("return_value").alias("amount").fill_null(0.0).cast(pl.Float64),
-                pl.lit(0.0).alias("discount_amount").cast(pl.Float64),
-                pl.lit(0).alias("is_ok").cast(pl.Int32),
-                pl.col("rg_responsibility"),
-                pl.lit(None).alias("payment_mode").cast(pl.Utf8),
-                pl.lit(None).alias("bank_name").cast(pl.Utf8),
-                pl.lit("raw_returns").alias("source_table"),
-                pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
-            ]
-        ).pipe(self._add_event_uid)
+        select_list = [
+            pl.col("customer_id").cast(pl.Utf8),
+            pl.lit("RETURN").alias("event_type"),
+            pl.coalesce(
+                [
+                    self._parse_date_column(df, "return_date"),
+                    self._parse_date_column(df, "created_at"),
+                ]
+            ).alias("event_date"),
+            pl.col("return_value").alias("amount").fill_null(0.0).cast(pl.Float64),
+            pl.lit(0.0).alias("discount_amount").cast(pl.Float64),
+            pl.lit(0).alias("is_ok").cast(pl.Int32),
+            pl.col("rg_responsibility"),
+            pl.lit(None).alias("payment_mode").cast(pl.Utf8),
+            pl.lit(None).alias("bank_name").cast(pl.Utf8),
+            pl.lit("raw_returns").alias("source_table"),
+            pl.col("id").cast(pl.Utf8).alias("source_raw_id"),
+        ]
+        
+        if "return_reason" in df.columns:
+            select_list.append(pl.col("return_reason"))
+
+        return df.select(select_list).pipe(self._add_event_uid)
 
     def _add_event_uid(self, df: pl.DataFrame) -> pl.DataFrame:
         # Use a stable identity: event_type + source_raw_id
