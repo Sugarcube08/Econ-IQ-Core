@@ -9,6 +9,7 @@ class BasePrediction(BaseModel):
     prediction_date: date
     score: float = Field(..., ge=0.0, le=1.0, description="Model probability or raw score")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence/trust interval")
+    model_version: str = Field(..., description="The ML model version used for this prediction")
     features_snapshot: dict[str, Any] = Field(default_factory=dict, description="Input features used at the time of prediction")
     key_drivers: list[str] = Field(default_factory=list, description="Top positive or negative feature drivers (e.g., SHAP/feature importance)")
 

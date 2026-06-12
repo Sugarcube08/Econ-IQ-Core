@@ -140,13 +140,7 @@ class IntelligenceOrchestrator:
         if not resilience_df.is_empty():
             states_df = states_df.join(resilience_df.drop(["date"]), on="customer_id", how="left")
 
-        # Add backward-compatible fields mapping (to avoid breaking current UI/API schemas)
-        states_df = states_df.with_columns(
-            pl.col("growth_score").alias("purchase_behavior_score"),
-            pl.col("risk_score").alias("rg_rate_score"),
-            pl.col("trust_score").alias("payment_behavior_score"),
-            pl.lit(0.0).alias("raw_rg_amount"),
-        )
+
         
         if "resilience_score" not in states_df.columns:
             states_df = states_df.with_columns(pl.lit(0.0).alias("resilience_score"))

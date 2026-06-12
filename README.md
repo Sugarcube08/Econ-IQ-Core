@@ -19,12 +19,13 @@ This repository is **ML-Ready** (supporting XGBoost, LightGBM, and CatBoost mode
          (24 longitudinal rolling features)
                           │
                           ▼
-             12 Internal B2B Dimensions
-     (Activity, Discipline, Credit, growth, etc.)
+
+              8 Consolidated B2B Dimensions
+      (Activity, Discipline, Credit, Growth, etc.)
                           │
                           ▼
-             8 Consolidated Public Scores
-        (Trust, Health, Risk, Opportunity, etc.)
+              8 Consolidated Public Scores
+         (Trust, Health, Risk, Opportunity, etc.)
                           │
        ┌──────────────────┴──────────────────┐
        ▼                                     ▼
@@ -41,9 +42,9 @@ Action Recommendations               Model Inference
   * [config/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/config/): Application configurations (`settings.py` loading from env).
   * [customers/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/customers/): API routers for customer datatables, detail profiles, predictions, and recommendations.
   * [dashboard/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/dashboard/): Analytical summary widgets and visualization backends.
-  * [explainability/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/explainability/): Causal diagnosis engine for score shifts and state transitions.
+  * [explainability/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/explainability/): Causal SHAP-based diagnostics engine for score shifts and state transitions.
   * [feature_store/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/feature_store/): Polars-based rolling window feature aggregation pipeline.
-  * [intelligence/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/intelligence/): Internal calculations for the 12 Dimensions, Meta-scores, and state machines.
+  * [intelligence/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/intelligence/): Internal calculations for the consolidated 8 Dimensions, Meta-scores, and state machines.
   * [prediction/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/prediction/): Hardened swappable estimator registry, inference engines, and drift monitors.
   * [recommendation/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/recommendation/): Rules-based action recommendation generation engine.
   * [schemas/](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/core/schemas/): Standard Pydantic schemas validating API schemas, predictions, and recommendations.
@@ -82,11 +83,11 @@ uv run pytest
 ## 4. Platform Contracts
 
 Detailed specifications can be found in the frozen platform documentation files:
-* [CANONICAL_PLATFORM_CONTRACT.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/CANONICAL_PLATFORM_CONTRACT.md): Frozen signatures for signals, features, dimensions, scores, predictions, and recommendation objects.
-* [FEATURE_CATALOG_V1.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/FEATURE_CATALOG_V1.md): Specification of the 24 longitudinal feature formulations, expected ranges, and fallbacks.
-* [FEATURE_QUALITY_AUDIT.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/FEATURE_QUALITY_AUDIT.md): Drift profiles, target leakage audits, and data validation boundaries.
-* [API_CONTRACT_V1.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/API_CONTRACT_V1.md): Frozen HTTP JSON specs for all core REST endpoints, including predictions and recommendations.
-* [EXPLAINABILITY_V1.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/EXPLAINABILITY_V1.md): SHAP integration plans and causal driver templates explaining score fluctuations.
+* [CANONICAL_PLATFORM_V2.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/CANONICAL_PLATFORM_V2.md): Frozen signatures for signals, features, dimensions, scores, predictions, and recommendation objects.
+* [FEATURE_CATALOG_V2.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/FEATURE_CATALOG_V2.md): Specification of the 24 longitudinal feature formulations, expected ranges, and fallbacks.
+* [SIGNAL_REALITY_AUDIT.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/SIGNAL_REALITY_AUDIT.md): Source signal availability audit and scoring bounds.
+* [API_CONTRACT_V2.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/API_CONTRACT_V2.md): HTTP JSON specs forREST endpoints serving the 8 canonical scores.
+* [EXPLAINABILITY_V2.md](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/EXPLAINABILITY_V2.md): SHAP driver variables and recommendations rationales.
 
 ---
 

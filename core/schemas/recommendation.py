@@ -13,14 +13,18 @@ class RecommendationType(StrEnum):
 
 
 class ActionRecommendation(BaseModel):
-    recommendation_type: RecommendationType
-    action: str = Field(..., description="Proposed action description")
-    value: Any = Field(None, description="Quantitative value associated with recommendation (e.g., credit limit amount)")
-    rationale: str = Field(..., description="Explanatory rationale for the recommendation")
+    type: RecommendationType = Field(..., description="Type of recommendation")
+    priority: str = Field(..., description="Priority level: LOW, MEDIUM, HIGH, CRITICAL")
+    reason: str = Field(..., description="Explanatory rationale for the recommendation")
+    affected_score: str = Field(..., description="Canonical score affected by recommendation")
+    expected_impact: str = Field(..., description="Expected impact rating: LOW, MEDIUM, HIGH")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence score")
+    action_category: str = Field(..., description="Proposed action category")
+    value: Any = Field(None, description="Quantitative value associated with recommendation (e.g., credit limit amount)")
 
 
 class CustomerRecommendations(BaseModel):
     customer_id: str
     generated_date: date
     recommendations: list[ActionRecommendation] = Field(default_factory=list)
+
