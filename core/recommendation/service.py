@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.policy.manager import policy_manager
 from core.prediction.service import PredictionService
 from core.schemas.recommendation import (
     ActionRecommendation,
@@ -33,7 +32,6 @@ class RecommendationService:
         churn_pred = await self.prediction_service.get_churn_prediction(session, customer_id)
         
         recommendations = []
-        policy = policy_manager.policy
 
         # 2. Credit Limit Recommendation
         if risk_pred.risk_level in ["LOW", "MEDIUM"] and growth_pred.growth_potential in ["EXPANSION", "ACCELERATING"]:

@@ -146,10 +146,8 @@ class DashboardRepository:
         # 3. Base Aggregates for Health (Always from serving layer for consistent scoring)
         health_agg_stmt = select(
             func.count(CustomerIntelligence.customer_id).label("total_customers"),
-            func.avg(CustomerIntelligence.purchase_score).label("avg_pur"),
-            func.avg(CustomerIntelligence.payment_score).label("avg_pay"),
-            func.avg(CustomerIntelligence.purchase_previous).label("avg_pur_prev"),
-            func.avg(CustomerIntelligence.payment_previous).label("avg_pay_prev"),
+            func.avg(CustomerIntelligence.health_score).label("avg_health"),
+            func.avg(CustomerIntelligence.health_previous).label("avg_health_prev"),
         )
         health_res = await self.db.execute(health_agg_stmt)
         health_agg = health_res.mappings().one()
@@ -178,11 +176,8 @@ class DashboardRepository:
         prev_window_agg = prev_window_res.mappings().one()
 
         # 5. Delta and Health Calculation
-        def calculate_health(pur, pay):
-            return round((0.50 * (pur or 0.0) + 0.50 * (pay or 0.0)) * 100.0, 2)
-
-        health_curr = calculate_health(health_agg["avg_pur"], health_agg["avg_pay"])
-        health_prev = calculate_health(health_agg["avg_pur_prev"], health_agg["avg_pay_prev"])
+        health_curr = round((health_agg["avg_health"] or 0.0) * 100.0, 2)
+        health_prev = round((health_agg["avg_health_prev"] or 0.0) * 100.0, 2)
 
         def calculate_delta(curr, prev):
             if not prev:
@@ -453,13 +448,13 @@ class DashboardRepository:
         Queries ONLY customer_intelligence serving layer.
         """
         # Composite Deterioration Score (Higher = Worse)
-        # Trust Loss (50%) + Payment Deterioration (30%) + Exposure Spike (20%)
+        # Trust Loss (50%) + Collection Deterioration (30%) + Exposure Spike (20%)
         deterioration_score = (
             -(CustomerIntelligence.trust_score - CustomerIntelligence.trust_previous) * 0.50 +
-            -(CustomerIntelligence.payment_score - CustomerIntelligence.payment_previous) * 0.30 +
+            -(CustomerIntelligence.collection_score - CustomerIntelligence.collection_previous) * 0.30 +
             (CustomerIntelligence.outstanding_current - CustomerIntelligence.outstanding_previous) / func.nullif(func.abs(CustomerIntelligence.outstanding_previous), 0.0) * 0.20
         ).label("det_score")
-
+ 
         query = select(
             CustomerIntelligence,
             deterioration_score
@@ -474,7 +469,7 @@ class DashboardRepository:
                 "city": r[0].city or "Unknown",
                 "trust_score": round(r[0].trust_score or 0.0, 4),
                 "trust_delta": round((r[0].trust_score or 0.0) - (r[0].trust_previous or 0.0), 4),
-                "payment_delta": round((r[0].payment_score or 0.0) - (r[0].payment_previous or 0.0), 4),
+                "payment_delta": round((r[0].collection_score or 0.0) - (r[0].collection_previous or 0.0), 4),
                 "repayment_health_delta": 0.0,
                 "outstanding_delta": round((r[0].outstanding_current or 0.0) - (r[0].outstanding_previous or 0.0), 2),
                 "state": r[0].state or "UNKNOWN",
@@ -482,27 +477,27 @@ class DashboardRepository:
                 "last_purchased_at": r[0].last_purchase_date.isoformat() if r[0].last_purchase_date else None,
             } for r in res.all()
         ]
-
+ 
     async def get_improving_customers(self, limit: int = 20) -> list[dict[str, Any]]:
         """
         Fetches top improving customers sorted by largest improvement score.
         Queries ONLY customer_intelligence serving layer.
         """
         # Composite Improvement Score (Higher = Better)
-        # Trust Increase (50%) + Payment Improvement (30%) + Outstanding Reduction (20%)
+        # Trust Increase (50%) + Collection Improvement (30%) + Outstanding Reduction (20%)
         improvement_score = (
             (CustomerIntelligence.trust_score - CustomerIntelligence.trust_previous) * 0.50 +
-            (CustomerIntelligence.payment_score - CustomerIntelligence.payment_previous) * 0.30 +
+            (CustomerIntelligence.collection_score - CustomerIntelligence.collection_previous) * 0.30 +
             -(CustomerIntelligence.outstanding_current - CustomerIntelligence.outstanding_previous) / func.nullif(func.abs(CustomerIntelligence.outstanding_previous), 0.0) * 0.20
         ).label("imp_score")
-
+ 
         query = select(
             CustomerIntelligence,
             improvement_score
         ).order_by(desc("imp_score")).limit(limit)
         
         res = await self.db.execute(query)
-
+ 
         return [
             {
                 "customer_id": r[0].customer_id,
@@ -510,7 +505,7 @@ class DashboardRepository:
                 "city": r[0].city or "Unknown",
                 "trust_score": round(r[0].trust_score or 0.0, 4),
                 "trust_delta": round((r[0].trust_score or 0.0) - (r[0].trust_previous or 0.0), 4),
-                "payment_delta": round((r[0].payment_score or 0.0) - (r[0].payment_previous or 0.0), 4),
+                "payment_delta": round((r[0].collection_score or 0.0) - (r[0].collection_previous or 0.0), 4),
                 "repayment_health_delta": 0.0,
                 "outstanding_delta": round((r[0].outstanding_current or 0.0) - (r[0].outstanding_previous or 0.0), 2),
                 "state": r[0].state or "UNKNOWN",

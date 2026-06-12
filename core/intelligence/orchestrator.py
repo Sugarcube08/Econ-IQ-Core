@@ -17,20 +17,15 @@ from core.intelligence.dimensions.growth import GrowthDimensionEngine
 from core.intelligence.dimensions.product import ProductDimensionEngine
 from core.intelligence.dimensions.relationship import RelationshipDimensionEngine
 from core.intelligence.dimensions.stability import StabilityDimensionEngine
-from core.intelligence.dimensions.value import ValueDimensionEngine
-from core.intelligence.dimensions.concentration import ConcentrationDimensionEngine
-from core.intelligence.dimensions.payment_mode import PaymentModeDimensionEngine
-from core.intelligence.dimensions.maturity import MaturityDimensionEngine
-
 from core.intelligence.exposure.pressure import ExposurePressureEngine
 from core.intelligence.ledger.reconstruction import LedgerReconstructionEngine
 from core.intelligence.meta.scores import MetaScoreEngine
 from core.intelligence.payment.rhythm import PaymentRhythmEngine
+from core.intelligence.relationship.engine import RelationshipEngine
+from core.intelligence.resilience.engine import ResilienceEngine
 from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.intelligence.states.engine import StateEngine
 from core.intelligence.stress.engine import StressEngine
-from core.intelligence.relationship.engine import RelationshipEngine
-from core.intelligence.resilience.engine import ResilienceEngine
 from core.intelligence.trade.consistency import TradeConsistencyEngine
 from core.intelligence.validator import IntelligenceIntegrityValidator
 from core.ledger.context import LedgerContextService
@@ -63,10 +58,6 @@ class IntelligenceOrchestrator:
         self.dim_friction = FrictionDimensionEngine()
         self.dim_growth = GrowthDimensionEngine()
         self.dim_stability = StabilityDimensionEngine()
-        self.dim_value = ValueDimensionEngine()
-        self.dim_concentration = ConcentrationDimensionEngine()
-        self.dim_payment_mode = PaymentModeDimensionEngine()
-        self.dim_maturity = MaturityDimensionEngine()
         
         self.meta_scores = MetaScoreEngine()
         self.state_engine = StateEngine()
@@ -115,10 +106,6 @@ class IntelligenceOrchestrator:
         dim_friction_df = self.dim_friction.compute(features_df)
         dim_growth_df = self.dim_growth.compute(features_df)
         dim_stability_df = self.dim_stability.compute(features_df, consistency_df)
-        dim_value_df = self.dim_value.compute(features_df)
-        dim_concentration_df = self.dim_concentration.compute(features_df)
-        dim_payment_mode_df = self.dim_payment_mode.compute(features_df)
-        dim_maturity_df = self.dim_maturity.compute(features_df)
 
         # Base frame
         dimensions_df = features_df.select(["customer_id", "date"])
@@ -127,8 +114,7 @@ class IntelligenceOrchestrator:
         for dim_df in [
             dim_activity_df, dim_discipline_df, dim_credit_df, 
             dim_relationship_df, dim_product_df, dim_friction_df, 
-            dim_growth_df, dim_stability_df, dim_value_df,
-            dim_concentration_df, dim_payment_mode_df, dim_maturity_df
+            dim_growth_df, dim_stability_df
         ]:
             if not dim_df.is_empty():
                 dimensions_df = dimensions_df.join(dim_df, on=["customer_id", "date"], how="left")
@@ -340,33 +326,31 @@ class IntelligenceOrchestrator:
             try:
                 import uuid
 
-                from sqlalchemy import MetaData, Table
-                _metadata = MetaData()
-                customers_tbl = await session.run_sync(
-                    lambda sync_conn: Table("customers", _metadata, autoload_with=sync_conn.bind)
-                )
+                from core.storage.postgres import get_reflected_table
+                customers_tbl = await get_reflected_table("customers", session)
                 
-                # Convert customer_ids to UUID objects for querying
-                uuid_cids = []
-                for cid in customer_ids:
-                    try:
-                        uuid_cids.append(uuid.UUID(cid))
-                    except ValueError:
-                        pass
-                
-                if uuid_cids:
-                    stmt = select(
-                        customers_tbl.c.id,
-                        customers_tbl.c.business_name,
-                        customers_tbl.c.city
-                    ).where(
-                        customers_tbl.c.id.in_(uuid_cids)
-                    )
+                if customers_tbl is not None:
+                    # Convert customer_ids to UUID objects for querying
+                    uuid_cids = []
+                    for cid in customer_ids:
+                        try:
+                            uuid_cids.append(uuid.UUID(cid))
+                        except ValueError:
+                            pass
                     
-                    res = await session.execute(stmt)
-                    for row in res.all():
-                        names_map[str(row.id)] = row.business_name
-                        cities_map[str(row.id)] = row.city
+                    if uuid_cids:
+                        stmt = select(
+                            customers_tbl.c.id,
+                            customers_tbl.c.business_name,
+                            customers_tbl.c.city
+                        ).where(
+                            customers_tbl.c.id.in_(uuid_cids)
+                        )
+                        
+                        res = await session.execute(stmt)
+                        for row in res.all():
+                            names_map[str(row.id)] = row.business_name
+                            cities_map[str(row.id)] = row.city
             except Exception as e:
                 logger.warning(f"Could not load customer names and cities in bulk: {e}")
 
@@ -383,17 +367,25 @@ class IntelligenceOrchestrator:
                                 "customer_id": cid,
                                 "customer_name": names_map.get(cid),
                                 "city": cities_map.get(cid),
+                                "health_score": 0.0,
+                                "risk_score": 0.0,
+                                "growth_score": 0.0,
                                 "trust_score": 0.0,
-                                "purchase_score": 0.0,
-                                "payment_score": 0.0,
-                                "rg_score": 0.0,
+                                "opportunity_score": 0.0,
+                                "credit_score": 0.0,
+                                "collection_score": 0.0,
+                                "relationship_score": 0.0,
                                 "contribution_current": 0.0,
                                 "outstanding_current": 0.0,
                                 "state": "inactive",
+                                "health_previous": 0.0,
+                                "risk_previous": 0.0,
+                                "growth_previous": 0.0,
                                 "trust_previous": 0.0,
-                                "purchase_previous": 0.0,
-                                "payment_previous": 0.0,
-                                "rg_previous": 0.0,
+                                "opportunity_previous": 0.0,
+                                "credit_previous": 0.0,
+                                "collection_previous": 0.0,
+                                "relationship_previous": 0.0,
                                 "contribution_previous": 0.0,
                                 "outstanding_previous": 0.0,
                                 "last_purchase_date": None,
@@ -443,29 +435,37 @@ class IntelligenceOrchestrator:
                             "customer_id": cid,
                             "customer_name": names_map.get(cid),
                             "city": cities_map.get(cid),
+                            "health_score": curr_row.get("health_score"),
+                            "risk_score": curr_row.get("risk_score"),
+                            "growth_score": curr_row.get("growth_score"),
                             "trust_score": curr_row.get("trust_score"),
-                            "purchase_score": curr_row.get("purchase_behavior_score"),
-                            "payment_score": curr_row.get("payment_behavior_score"),
-                            "rg_score": curr_row.get("rg_rate_score"),
+                            "opportunity_score": curr_row.get("opportunity_score"),
+                            "credit_score": curr_row.get("credit_score"),
+                            "collection_score": curr_row.get("collection_score"),
+                            "relationship_score": curr_row.get("relationship_score"),
                             "contribution_current": curr_contrib,
                             "outstanding_current": curr_outstanding,
                             "state": curr_row.get("behavioral_state"),
+                            "health_previous": prev_row.get("health_score"),
+                            "risk_previous": prev_row.get("risk_score"),
+                            "growth_previous": prev_row.get("growth_score"),
                             "trust_previous": prev_row.get("trust_score"),
-                            "purchase_previous": prev_row.get("purchase_behavior_score"),
-                            "payment_previous": prev_row.get("payment_behavior_score"),
-                            "rg_previous": prev_row.get("rg_rate_score"),
+                            "opportunity_previous": prev_row.get("opportunity_score"),
+                            "credit_previous": prev_row.get("credit_score"),
+                            "collection_previous": prev_row.get("collection_score"),
+                            "relationship_previous": prev_row.get("relationship_score"),
                             "contribution_previous": prev_contrib,
                             "outstanding_previous": prev_outstanding,
                             "last_purchase_date": last_purchase_date,
                             "v2_scores": {
-                                "growth_score": curr_row.get("growth_score", 0.0),
-                                "risk_score": curr_row.get("risk_score", 0.0),
-                                "relationship_score": curr_row.get("relationship_score", 0.0),
-                                "resilience_score": curr_row.get("resilience_score", 0.0),
-                                "opportunity_score": curr_row.get("opportunity_score", 0.0),
                                 "health_score": curr_row.get("health_score", 0.0),
-                                "strategic_value_score": curr_row.get("strategic_value_score", 0.0),
-                                "stability_score": curr_row.get("stability_score", 0.0),
+                                "risk_score": curr_row.get("risk_score", 0.0),
+                                "growth_score": curr_row.get("growth_score", 0.0),
+                                "trust_score": curr_row.get("trust_score", 0.0),
+                                "opportunity_score": curr_row.get("opportunity_score", 0.0),
+                                "credit_score": curr_row.get("credit_score", 0.0),
+                                "collection_score": curr_row.get("collection_score", 0.0),
+                                "relationship_score": curr_row.get("relationship_score", 0.0),
                                 "dimensions": {
                                     "activity": curr_row.get("dim_activity", 0.0),
                                     "discipline": curr_row.get("dim_discipline", 0.0),
@@ -475,10 +475,6 @@ class IntelligenceOrchestrator:
                                     "friction": curr_row.get("dim_friction", 0.0),
                                     "growth": curr_row.get("dim_growth", 0.0),
                                     "stability": curr_row.get("dim_stability", 0.0),
-                                    "value": curr_row.get("dim_value", 0.0),
-                                    "concentration": curr_row.get("dim_concentration", 0.0),
-                                    "payment_mode": curr_row.get("dim_payment_mode", 0.0),
-                                    "maturity": curr_row.get("dim_maturity", 0.0),
                                 }
                             }
                         }

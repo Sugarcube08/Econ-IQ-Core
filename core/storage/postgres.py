@@ -32,6 +32,56 @@ class Base(DeclarativeBase):
     pass
 
 
+from sqlalchemy import MetaData, Table
+from sqlalchemy.exc import NoSuchTableError
+
+# Global metadata cache for reflected tables to prevent memory leaks
+reflected_metadata = MetaData()
+_missing_tables = set()
+_lock = None
+
+
+def _get_lock():
+    global _lock
+    if _lock is None:
+        import asyncio
+        _lock = asyncio.Lock()
+    return _lock
+
+
+async def get_reflected_table(table_name: str, session: AsyncSession) -> Table | None:
+    """
+    Safely reflects a table from the database, caching the result globally to prevent memory leaks
+    from repeated MetaData instantiations and table reflection. Caches missing tables to prevent
+    redundant database queries.
+    """
+    # 1. Quick check without lock
+    if table_name in reflected_metadata.tables:
+        return reflected_metadata.tables[table_name]
+    if table_name in _missing_tables:
+        return None
+
+    # 2. Acquire lock to reflect table
+    async with _get_lock():
+        # Re-check inside lock
+        if table_name in reflected_metadata.tables:
+            return reflected_metadata.tables[table_name]
+        if table_name in _missing_tables:
+            return None
+
+        try:
+            table = await session.run_sync(
+                lambda sync_conn: Table(table_name, reflected_metadata, autoload_with=sync_conn.bind)
+            )
+            return table
+        except NoSuchTableError:
+            _missing_tables.add(table_name)
+            return None
+        except Exception as e:
+            # Do not cache general connection/transient errors as missing
+            raise e
+
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session

@@ -1,3 +1,5 @@
+from datetime import date
+
 import polars as pl
 from loguru import logger
 from sqlalchemy import func, not_, select
@@ -26,13 +28,11 @@ class LedgerContextService:
         logger.debug(f"Loading historical context for {len(customer_ids)} customers from PostgreSQL")
 
         # 1. Fetch Live Opening Balances from customers
-        from sqlalchemy import MetaData, Table
-        _metadata = MetaData()
         try:
-            customers_tbl = await session.run_sync(
-                lambda sync_conn: Table("customers", _metadata, autoload_with=sync_conn.bind)
-            )
-            if "opening_balance" in customers_tbl.c:
+            from core.storage.postgres import get_reflected_table
+            customers_tbl = await get_reflected_table("customers", session)
+            
+            if customers_tbl is not None and "opening_balance" in customers_tbl.c:
                 opening_stmt = select(customers_tbl.c.id, customers_tbl.c.opening_balance).where(
                     customers_tbl.c.id.in_(customer_ids)
                 )
@@ -100,7 +100,6 @@ class LedgerContextService:
             dicts.append(d)
 
         # 3. Inject Live Opening Balance events as the chronological anchor
-        from datetime import date
         for cid, balance in opening_balances.items():
             if balance != 0:
                 dicts.append({

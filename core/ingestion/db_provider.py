@@ -3,12 +3,8 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from sqlalchemy import MetaData, Table, select, update
-from sqlalchemy.exc import NoSuchTableError
+from sqlalchemy import Table, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# Global metadata to cache reflected tables across provider instances
-_REFLECTED_METADATA = MetaData()
 
 
 class DBIngestionProvider:
@@ -18,18 +14,13 @@ class DBIngestionProvider:
 
     async def _get_table(self, table_name: str) -> Table | None:
         """Reflects an external table only if it exists, using a global cache."""
-        # 1. Check if already in cache
-        if table_name in _REFLECTED_METADATA.tables:
-            return _REFLECTED_METADATA.tables[table_name]
-
-        # 2. Reflect from DB
-        try:
-            return await self.session.run_sync(
-                lambda sync_conn: Table(table_name, _REFLECTED_METADATA, autoload_with=sync_conn.bind)
-            )
-        except NoSuchTableError:
+        from core.storage.postgres import get_reflected_table, _missing_tables
+        
+        is_already_missing = table_name in _missing_tables
+        table = await get_reflected_table(table_name, self.session)
+        if table is None and not is_already_missing:
             logger.warning(f"External raw table '{table_name}' does not exist. Skipping.")
-            return None
+        return table
 
     async def ingest_async(self) -> tuple[pl.DataFrame, dict[str, list[Any]], list[str]]:
         """

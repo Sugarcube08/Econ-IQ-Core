@@ -62,31 +62,33 @@ class IntelligenceRepository:
         # Also update customers.behavioral_profile if the customers table exists
         try:
             import uuid
+            from sqlalchemy import update
+            from core.storage.postgres import get_reflected_table
 
-            from sqlalchemy import MetaData, Table, update
-            metadata = MetaData()
-            customers_tbl = await self.db.run_sync(
-                lambda sync_conn: Table("customers", metadata, autoload_with=sync_conn.bind)
-            )
-            # Storing scores in behavioral_profile
-            profile_payload = {
-                "trust_score": intelligence_data.get("trust_score"),
-                "purchase_score": intelligence_data.get("purchase_score"),
-                "payment_score": intelligence_data.get("payment_score"),
-                "rg_score": intelligence_data.get("rg_score"),
-                "state": intelligence_data.get("state"),
-                "outstanding_current": intelligence_data.get("outstanding_current"),
-                "contribution_current": intelligence_data.get("contribution_current"),
-                # v2 score profiles
-                "v2_scores": intelligence_data.get("v2_scores", {}),
-                "last_updated": datetime.now(UTC).isoformat()
-            }
-            stmt_cust = (
-                update(customers_tbl)
-                .where(customers_tbl.c.id == uuid.UUID(customer_id))
-                .values(behavioral_profile=self._sanitize_for_json(profile_payload))
-            )
-            await self.db.execute(stmt_cust)
+            customers_tbl = await get_reflected_table("customers", self.db)
+            if customers_tbl is not None:
+                # Storing scores in behavioral_profile
+                profile_payload = {
+                    "health_score": intelligence_data.get("health_score"),
+                    "risk_score": intelligence_data.get("risk_score"),
+                    "growth_score": intelligence_data.get("growth_score"),
+                    "trust_score": intelligence_data.get("trust_score"),
+                    "opportunity_score": intelligence_data.get("opportunity_score"),
+                    "credit_score": intelligence_data.get("credit_score"),
+                    "collection_score": intelligence_data.get("collection_score"),
+                    "relationship_score": intelligence_data.get("relationship_score"),
+                    "state": intelligence_data.get("state"),
+                    "outstanding_current": intelligence_data.get("outstanding_current"),
+                    "contribution_current": intelligence_data.get("contribution_current"),
+                    "v2_scores": intelligence_data.get("v2_scores", {}),
+                    "last_updated": datetime.now(UTC).isoformat()
+                }
+                stmt_cust = (
+                    update(customers_tbl)
+                    .where(customers_tbl.c.id == uuid.UUID(customer_id))
+                    .values(behavioral_profile=self._sanitize_for_json(profile_payload))
+                )
+                await self.db.execute(stmt_cust)
         except Exception as e:
             logger.warning(f"Could not update customers.behavioral_profile for {customer_id}: {e}")
 

@@ -298,14 +298,23 @@ class ResilientIntelligenceOrchestrator:
 
     def _build_payload_from_cache(self, customer_basic: dict[str, Any], cached: Any) -> CustomerProfileResponseData:
         """Reconstructs full schema using cached materialized history (Highest-fidelity fallback)."""
-        trust_val = cached.trust_score or 0.0
-        trust_prev_val = cached.trust_previous or 0.0
-        pur_val = cached.purchase_score or 0.0
-        pur_prev_val = cached.purchase_previous or 0.0
-        pay_val = cached.payment_score or 0.0
-        pay_prev_val = cached.payment_previous or 0.0
-        rg_val = cached.rg_score or 0.0
-        rg_prev_val = cached.rg_previous or 0.0
+        h_score = cached.health_score or 0.0
+        h_prev = cached.health_previous or 0.0
+        r_score = cached.risk_score or 0.0
+        r_prev = cached.risk_previous or 0.0
+        g_score = cached.growth_score or 0.0
+        g_prev = cached.growth_previous or 0.0
+        t_score = cached.trust_score or 0.0
+        t_prev = cached.trust_previous or 0.0
+        o_score = cached.opportunity_score or 0.0
+        o_prev = cached.opportunity_previous or 0.0
+        c_score = cached.credit_score or 0.0
+        c_prev = cached.credit_previous or 0.0
+        col_score = cached.collection_score or 0.0
+        col_prev = cached.collection_previous or 0.0
+        rel_score = cached.relationship_score or 0.0
+        rel_prev = cached.relationship_previous or 0.0
+        
         out_val = cached.outstanding_current or 0.0
         out_prev_val = cached.outstanding_previous or 0.0
         contrib_val = cached.contribution_current or 0.0
@@ -317,18 +326,26 @@ class ResilientIntelligenceOrchestrator:
                 customer_name=customer_basic["customer_name"],
                 city=customer_basic["city_name"],
                 scores=CustomerScoreSchema(
-                    trust_score=trust_val,
-                    purchase_behavior_score=pur_val,
-                    payment_behavior_score=pay_val,
-                    rg_behavior_score=rg_val,
+                    health_score=h_score,
+                    risk_score=r_score,
+                    growth_score=g_score,
+                    trust_score=t_score,
+                    opportunity_score=o_score,
+                    credit_score=c_score,
+                    collection_score=col_score,
+                    relationship_score=rel_score,
                     outstanding_current=out_val,
                     outstanding_previous=out_prev_val,
                 ),
                 deltas=CustomerDeltaSchema(
-                    trust_score=round(trust_val - trust_prev_val, 4),
-                    purchase_behavior_score=round(pur_val - pur_prev_val, 4),
-                    payment_behavior_score=round(pay_val - pay_prev_val, 4),
-                    rg_behavior_score=round(rg_val - rg_prev_val, 4),
+                    health_score=round(h_score - h_prev, 4),
+                    risk_score=round(r_score - r_prev, 4),
+                    growth_score=round(g_score - g_prev, 4),
+                    trust_score=round(t_score - t_prev, 4),
+                    opportunity_score=round(o_score - o_prev, 4),
+                    credit_score=round(c_score - c_prev, 4),
+                    collection_score=round(col_score - col_prev, 4),
+                    relationship_score=round(rel_score - rel_prev, 4),
                     outstanding_delta=round(out_val - out_prev_val, 4),
                 ),
                 behavior_state=cached.state or "UNKNOWN",
@@ -349,18 +366,26 @@ class ResilientIntelligenceOrchestrator:
                 customer_name=customer_basic["customer_name"],
                 city=customer_basic["city_name"],
                 scores=CustomerScoreSchema(
+                    health_score=0.0,
+                    risk_score=0.0,
+                    growth_score=0.0,
                     trust_score=0.0,
-                    purchase_behavior_score=0.0,
-                    payment_behavior_score=0.0,
-                    rg_behavior_score=0.0,
+                    opportunity_score=0.0,
+                    credit_score=0.0,
+                    collection_score=0.0,
+                    relationship_score=0.0,
                     outstanding_current=0.0,
                     outstanding_previous=0.0
                 ),
                 deltas=CustomerDeltaSchema(
+                    health_score=0.0,
+                    risk_score=0.0,
+                    growth_score=0.0,
                     trust_score=0.0,
-                    purchase_behavior_score=0.0,
-                    payment_behavior_score=0.0,
-                    rg_behavior_score=0.0,
+                    opportunity_score=0.0,
+                    credit_score=0.0,
+                    collection_score=0.0,
+                    relationship_score=0.0,
                     outstanding_delta=0.0
                 ),
                 behavior_state=mode,
@@ -388,19 +413,27 @@ class ResilientIntelligenceOrchestrator:
         prev_row = prev_df.to_dicts()[0] if not prev_df.is_empty() else {}
 
         scores_dict = {
+            "health_score": curr_row.get("health_score") or 0.0,
+            "risk_score": curr_row.get("risk_score") or 0.0,
+            "growth_score": curr_row.get("growth_score") or 0.0,
             "trust_score": curr_row.get("trust_score") or 0.0,
-            "purchase_behavior_score": curr_row.get("purchase_behavior_score") or 0.0,
-            "payment_behavior_score": curr_row.get("payment_behavior_score") or 0.0,
-            "rg_behavior_score": curr_row.get("rg_rate_score") or 0.0,
+            "opportunity_score": curr_row.get("opportunity_score") or 0.0,
+            "credit_score": curr_row.get("credit_score") or 0.0,
+            "collection_score": curr_row.get("collection_score") or 0.0,
+            "relationship_score": curr_row.get("relationship_score") or 0.0,
             "outstanding_current": curr_row.get("outstanding_balance") or 0.0,
             "outstanding_previous": prev_row.get("outstanding_balance") or 0.0,
         }
 
         deltas_dict = {
+            "health_score": round(scores_dict["health_score"] - (prev_row.get("health_score") or 0.0), 4),
+            "risk_score": round(scores_dict["risk_score"] - (prev_row.get("risk_score") or 0.0), 4),
+            "growth_score": round(scores_dict["growth_score"] - (prev_row.get("growth_score") or 0.0), 4),
             "trust_score": round(scores_dict["trust_score"] - (prev_row.get("trust_score") or 0.0), 4),
-            "purchase_behavior_score": round(scores_dict["purchase_behavior_score"] - (prev_row.get("purchase_behavior_score") or 0.0), 4),
-            "payment_behavior_score": round(scores_dict["payment_behavior_score"] - (prev_row.get("payment_behavior_score") or 0.0), 4),
-            "rg_behavior_score": round(scores_dict["rg_behavior_score"] - (prev_row.get("rg_rate_score") or 0.0), 4),
+            "opportunity_score": round(scores_dict["opportunity_score"] - (prev_row.get("opportunity_score") or 0.0), 4),
+            "credit_score": round(scores_dict["credit_score"] - (prev_row.get("credit_score") or 0.0), 4),
+            "collection_score": round(scores_dict["collection_score"] - (prev_row.get("collection_score") or 0.0), 4),
+            "relationship_score": round(scores_dict["relationship_score"] - (prev_row.get("relationship_score") or 0.0), 4),
             "outstanding_delta": round(scores_dict["outstanding_current"] - scores_dict["outstanding_previous"], 4),
         }
 
@@ -451,19 +484,27 @@ class ResilientIntelligenceOrchestrator:
         curr_row = curr_df.to_dicts()[0]
         
         scores_dict = {
+            "health_score": curr_row.get("health_score") or 0.0,
+            "risk_score": curr_row.get("risk_score") or 0.0,
+            "growth_score": curr_row.get("growth_score") or 0.0,
             "trust_score": curr_row.get("trust_score") or 0.0,
-            "purchase_behavior_score": curr_row.get("purchase_behavior_score") or 0.0,
-            "payment_behavior_score": curr_row.get("payment_behavior_score") or 0.0,
-            "rg_behavior_score": curr_row.get("rg_rate_score") or 0.0,
+            "opportunity_score": curr_row.get("opportunity_score") or 0.0,
+            "credit_score": curr_row.get("credit_score") or 0.0,
+            "collection_score": curr_row.get("collection_score") or 0.0,
+            "relationship_score": curr_row.get("relationship_score") or 0.0,
             "outstanding_current": curr_row.get("outstanding_balance") or 0.0,
             "outstanding_previous": 0.0,
         }
 
         deltas_dict = {
+            "health_score": 0.0,
+            "risk_score": 0.0,
+            "growth_score": 0.0,
             "trust_score": 0.0,
-            "purchase_behavior_score": 0.0,
-            "payment_behavior_score": 0.0,
-            "rg_behavior_score": 0.0,
+            "opportunity_score": 0.0,
+            "credit_score": 0.0,
+            "collection_score": 0.0,
+            "relationship_score": 0.0,
             "outstanding_delta": 0.0,
         }
 

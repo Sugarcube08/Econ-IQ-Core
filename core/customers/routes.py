@@ -14,6 +14,10 @@ from core.intelligence.orchestrator import IntelligenceOrchestrator
 from core.intelligence.resilience import ResilientIntelligenceOrchestrator
 from core.models.auth_models import APIKey, User
 from core.models.state_models import CustomerIntelligence, EventLedger
+
+# Hardening Phase: Prediction & Recommendation service/schemas integration
+from core.prediction.service import PredictionService
+from core.recommendation.service import RecommendationService
 from core.repositories.intelligence import IntelligenceRepository
 from core.schemas.customers import (
     CustomerDatatableDeltas,
@@ -31,6 +35,7 @@ from core.schemas.customers import (
     RGGraphPoint,
 )
 from core.schemas.intelligence import AnalysisContext
+from core.schemas.recommendation import CustomerRecommendations
 from core.schemas.responses import ErrorResponse, StandardResponse
 from core.storage.postgres import get_db
 from core.utils.temporal import normalize_temporal_to_date, normalize_temporal_to_str
@@ -75,20 +80,23 @@ def build_customers_query(
     sort_by: str = "trust_score",
     sort_order: str = "desc",
     search: str | None = None,
-    overall_grade: str | None = None,
     current_state: str | None = None,
+    health_score_min: float | None = None,
+    health_score_max: float | None = None,
+    risk_score_min: float | None = None,
+    risk_score_max: float | None = None,
+    growth_score_min: float | None = None,
+    growth_score_max: float | None = None,
     trust_score_min: float | None = None,
     trust_score_max: float | None = None,
-    payment_score_min: float | None = None,
-    payment_score_max: float | None = None,
-    purchase_score_min: float | None = None,
-    purchase_score_max: float | None = None,
-    payment_behavior_min: float | None = None,
-    payment_behavior_max: float | None = None,
-    purchase_behavior_min: float | None = None,
-    purchase_behavior_max: float | None = None,
-    rg_score_min: float | None = None,
-    rg_score_max: float | None = None,
+    opportunity_score_min: float | None = None,
+    opportunity_score_max: float | None = None,
+    credit_score_min: float | None = None,
+    credit_score_max: float | None = None,
+    collection_score_min: float | None = None,
+    collection_score_max: float | None = None,
+    relationship_score_min: float | None = None,
+    relationship_score_max: float | None = None,
     contribution_min: float | None = None,
     contribution_max: float | None = None,
     last_purchase_date_start: date | None = None,
@@ -103,19 +111,18 @@ def build_customers_query(
         "customer_id": CustomerIntelligence.customer_id,
         "customer_name": CustomerIntelligence.customer_name,
         "city": CustomerIntelligence.city,
+        "health_score": CustomerIntelligence.health_score,
+        "risk_score": CustomerIntelligence.risk_score,
+        "growth_score": CustomerIntelligence.growth_score,
         "trust_score": CustomerIntelligence.trust_score,
-        "purchase_score": CustomerIntelligence.purchase_score,
-        "purchase_behavior_score": CustomerIntelligence.purchase_score,
-        "payment_score": CustomerIntelligence.payment_score,
-        "payment_behavior_score": CustomerIntelligence.payment_score,
-        "rg_score": CustomerIntelligence.rg_score,
-        "rg_behavior_score": CustomerIntelligence.rg_score,
+        "opportunity_score": CustomerIntelligence.opportunity_score,
+        "credit_score": CustomerIntelligence.credit_score,
+        "collection_score": CustomerIntelligence.collection_score,
+        "relationship_score": CustomerIntelligence.relationship_score,
         "state": CustomerIntelligence.state,
         "current_state": CustomerIntelligence.state,
-        "overall_grade": CustomerIntelligence.trust_score,
         "outstanding_current": CustomerIntelligence.outstanding_current,
         "contribution_current": CustomerIntelligence.contribution_current,
-        "contribution_score_current": CustomerIntelligence.contribution_current,
         "last_purchase_date": CustomerIntelligence.last_purchase_date,
         "updated_at": CustomerIntelligence.last_updated,
     }
@@ -125,15 +132,23 @@ def build_customers_query(
         CustomerIntelligence.customer_id,
         CustomerIntelligence.customer_name,
         CustomerIntelligence.city,
+        CustomerIntelligence.health_score,
+        CustomerIntelligence.risk_score,
+        CustomerIntelligence.growth_score,
         CustomerIntelligence.trust_score,
-        CustomerIntelligence.purchase_score,
-        CustomerIntelligence.payment_score,
-        CustomerIntelligence.rg_score,
+        CustomerIntelligence.opportunity_score,
+        CustomerIntelligence.credit_score,
+        CustomerIntelligence.collection_score,
+        CustomerIntelligence.relationship_score,
         CustomerIntelligence.state,
+        CustomerIntelligence.health_previous,
+        CustomerIntelligence.risk_previous,
+        CustomerIntelligence.growth_previous,
         CustomerIntelligence.trust_previous,
-        CustomerIntelligence.purchase_previous,
-        CustomerIntelligence.payment_previous,
-        CustomerIntelligence.rg_previous,
+        CustomerIntelligence.opportunity_previous,
+        CustomerIntelligence.credit_previous,
+        CustomerIntelligence.collection_previous,
+        CustomerIntelligence.relationship_previous,
         CustomerIntelligence.last_updated,
         CustomerIntelligence.outstanding_current,
         CustomerIntelligence.outstanding_previous,
@@ -143,21 +158,6 @@ def build_customers_query(
     )
 
     # 3. Dynamic Filtering
-    if overall_grade:
-        grades = [g.strip().upper() for g in overall_grade.split(",")]
-        grade_conditions = []
-        for g in grades:
-            if g == "A":
-                grade_conditions.append(CustomerIntelligence.trust_score >= 0.70)
-            elif g == "B":
-                grade_conditions.append((CustomerIntelligence.trust_score >= 0.55) & (CustomerIntelligence.trust_score < 0.70))
-            elif g == "C":
-                grade_conditions.append((CustomerIntelligence.trust_score >= 0.40) & (CustomerIntelligence.trust_score < 0.55))
-            elif g == "D":
-                grade_conditions.append((CustomerIntelligence.trust_score < 0.40) | (CustomerIntelligence.trust_score.is_(None)))
-        if grade_conditions:
-            query = query.where(or_(*grade_conditions))
-
     if current_state:
         states = [s.strip().lower() for s in current_state.split(",")]
         if len(states) > 1:
@@ -165,30 +165,45 @@ def build_customers_query(
         else:
             query = query.where(CustomerIntelligence.state.ilike(states[0]))
     
+    if health_score_min is not None:
+        query = query.where(CustomerIntelligence.health_score >= health_score_min)
+    if health_score_max is not None:
+        query = query.where(CustomerIntelligence.health_score <= health_score_max)
+
+    if risk_score_min is not None:
+        query = query.where(CustomerIntelligence.risk_score >= risk_score_min)
+    if risk_score_max is not None:
+        query = query.where(CustomerIntelligence.risk_score <= risk_score_max)
+
+    if growth_score_min is not None:
+        query = query.where(CustomerIntelligence.growth_score >= growth_score_min)
+    if growth_score_max is not None:
+        query = query.where(CustomerIntelligence.growth_score <= growth_score_max)
+
     if trust_score_min is not None:
         query = query.where(CustomerIntelligence.trust_score >= trust_score_min)
     if trust_score_max is not None:
         query = query.where(CustomerIntelligence.trust_score <= trust_score_max)
-        
-    pay_min = payment_score_min if payment_score_min is not None else payment_behavior_min
-    pay_max = payment_score_max if payment_score_max is not None else payment_behavior_max
-    pur_min = purchase_score_min if purchase_score_min is not None else purchase_behavior_min
-    pur_max = purchase_score_max if purchase_score_max is not None else purchase_behavior_max
 
-    if pay_min is not None:
-        query = query.where(CustomerIntelligence.payment_score >= pay_min)
-    if pay_max is not None:
-        query = query.where(CustomerIntelligence.payment_score <= pay_max)
-        
-    if pur_min is not None:
-        query = query.where(CustomerIntelligence.purchase_score >= pur_min)
-    if pur_max is not None:
-        query = query.where(CustomerIntelligence.purchase_score <= pur_max)
+    if opportunity_score_min is not None:
+        query = query.where(CustomerIntelligence.opportunity_score >= opportunity_score_min)
+    if opportunity_score_max is not None:
+        query = query.where(CustomerIntelligence.opportunity_score <= opportunity_score_max)
 
-    if rg_score_min is not None:
-        query = query.where(CustomerIntelligence.rg_score >= rg_score_min)
-    if rg_score_max is not None:
-        query = query.where(CustomerIntelligence.rg_score <= rg_score_max)
+    if credit_score_min is not None:
+        query = query.where(CustomerIntelligence.credit_score >= credit_score_min)
+    if credit_score_max is not None:
+        query = query.where(CustomerIntelligence.credit_score <= credit_score_max)
+
+    if collection_score_min is not None:
+        query = query.where(CustomerIntelligence.collection_score >= collection_score_min)
+    if collection_score_max is not None:
+        query = query.where(CustomerIntelligence.collection_score <= collection_score_max)
+
+    if relationship_score_min is not None:
+        query = query.where(CustomerIntelligence.relationship_score >= relationship_score_min)
+    if relationship_score_max is not None:
+        query = query.where(CustomerIntelligence.relationship_score <= relationship_score_max)
 
     if contribution_min is not None:
         query = query.where(CustomerIntelligence.contribution_current >= contribution_min)
@@ -235,20 +250,23 @@ async def list_customers_datatable(
     sort_by: str = Query("trust_score", description="Field to sort by"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
     search: str | None = Query(None, description="Fuzzy search by customer ID or name"),
-    overall_grade: str | None = Query(None, description="Filter by overall grade (A, B, C, etc.)"),
     current_state: str | None = Query(None, description="Filter by behavioral state"),
+    health_score_min: float | None = Query(None, description="Min health score"),
+    health_score_max: float | None = Query(None, description="Max health score"),
+    risk_score_min: float | None = Query(None, description="Min risk score"),
+    risk_score_max: float | None = Query(None, description="Max risk score"),
+    growth_score_min: float | None = Query(None, description="Min growth score"),
+    growth_score_max: float | None = Query(None, description="Max growth score"),
     trust_score_min: float | None = Query(None, description="Min trust score"),
     trust_score_max: float | None = Query(None, description="Max trust score"),
-    payment_score_min: float | None = Query(None, description="Min payment score"),
-    payment_score_max: float | None = Query(None, description="Max payment score"),
-    purchase_score_min: float | None = Query(None, description="Min purchase score"),
-    purchase_score_max: float | None = Query(None, description="Max purchase score"),
-    payment_behavior_min: float | None = Query(None, description="Min payment behavior score"),
-    payment_behavior_max: float | None = Query(None, description="Max payment behavior score"),
-    purchase_behavior_min: float | None = Query(None, description="Min purchase behavior score"),
-    purchase_behavior_max: float | None = Query(None, description="Max purchase behavior score"),
-    rg_score_min: float | None = Query(None, description="Min RG score"),
-    rg_score_max: float | None = Query(None, description="Max RG score"),
+    opportunity_score_min: float | None = Query(None, description="Min opportunity score"),
+    opportunity_score_max: float | None = Query(None, description="Max opportunity score"),
+    credit_score_min: float | None = Query(None, description="Min credit score"),
+    credit_score_max: float | None = Query(None, description="Max credit score"),
+    collection_score_min: float | None = Query(None, description="Min collection score"),
+    collection_score_max: float | None = Query(None, description="Max collection score"),
+    relationship_score_min: float | None = Query(None, description="Min relationship score"),
+    relationship_score_max: float | None = Query(None, description="Max relationship score"),
     contribution_min: float | None = Query(None, description="Min contribution score"),
     contribution_max: float | None = Query(None, description="Max contribution score"),
     last_purchase_date_start: date | None = Query(None, description="Start date of last purchase"),
@@ -267,20 +285,23 @@ async def list_customers_datatable(
         sort_by=sort_by,
         sort_order=sort_order,
         search=search,
-        overall_grade=overall_grade,
         current_state=current_state,
+        health_score_min=health_score_min,
+        health_score_max=health_score_max,
+        risk_score_min=risk_score_min,
+        risk_score_max=risk_score_max,
+        growth_score_min=growth_score_min,
+        growth_score_max=growth_score_max,
         trust_score_min=trust_score_min,
         trust_score_max=trust_score_max,
-        payment_score_min=payment_score_min,
-        payment_score_max=payment_score_max,
-        purchase_score_min=purchase_score_min,
-        purchase_score_max=purchase_score_max,
-        payment_behavior_min=payment_behavior_min,
-        payment_behavior_max=payment_behavior_max,
-        purchase_behavior_min=purchase_behavior_min,
-        purchase_behavior_max=purchase_behavior_max,
-        rg_score_min=rg_score_min,
-        rg_score_max=rg_score_max,
+        opportunity_score_min=opportunity_score_min,
+        opportunity_score_max=opportunity_score_max,
+        credit_score_min=credit_score_min,
+        credit_score_max=credit_score_max,
+        collection_score_min=collection_score_min,
+        collection_score_max=collection_score_max,
+        relationship_score_min=relationship_score_min,
+        relationship_score_max=relationship_score_max,
         contribution_min=contribution_min,
         contribution_max=contribution_max,
         last_purchase_date_start=last_purchase_date_start,
@@ -300,20 +321,27 @@ async def list_customers_datatable(
     # 3. Response Mapping
     rows = []
     for c in customers:
+        h_score = c["health_score"] or 0.0
+        h_prev = c["health_previous"] or 0.0
+        risk_score = c["risk_score"] or 0.0
+        risk_prev = c["risk_previous"] or 0.0
+        g_score = c["growth_score"] or 0.0
+        g_prev = c["growth_previous"] or 0.0
         t_score = c["trust_score"] or 0.0
         t_prev = c["trust_previous"] or 0.0
-        pur_score = c["purchase_score"] or 0.0
-        pur_prev = c["purchase_previous"] or 0.0
-        pay_score = c["payment_score"] or 0.0
-        pay_prev = c["payment_previous"] or 0.0
-        rg_score = c["rg_score"] or 0.0
-        rg_prev = c["rg_previous"] or 0.0
+        opp_score = c["opportunity_score"] or 0.0
+        opp_prev = c["opportunity_previous"] or 0.0
+        cred_score = c["credit_score"] or 0.0
+        cred_prev = c["credit_previous"] or 0.0
+        coll_score = c["collection_score"] or 0.0
+        coll_prev = c["collection_previous"] or 0.0
+        rel_score = c["relationship_score"] or 0.0
+        rel_prev = c["relationship_previous"] or 0.0
+        
         out_curr = c["outstanding_current"] or 0.0
         out_prev = c["outstanding_previous"] or 0.0
         contrib_curr = c["contribution_current"] or 0.0
         contrib_prev = c["contribution_previous"] or 0.0
-
-        derived_grade = "A" if t_score >= 0.70 else "B" if t_score >= 0.55 else "C" if t_score >= 0.40 else "D"
 
         def calculate_pct_delta(curr, prev):
             if not prev:
@@ -325,32 +353,32 @@ async def list_customers_datatable(
             customer_name=c["customer_name"],
             city=c["city"],
             
-            # Standard Fields
+            # 8 Canonical Scores
+            health_score=h_score,
+            risk_score=risk_score,
+            growth_score=g_score,
             trust_score=t_score,
-            purchase_score=pur_score,
-            payment_score=pay_score,
-            rg_score=rg_score,
+            opportunity_score=opp_score,
+            credit_score=cred_score,
+            collection_score=coll_score,
+            relationship_score=rel_score,
+            
             state=c["state"],
-            overall_grade=derived_grade,
             outstanding_current=out_curr,
             outstanding_previous=out_prev,
             contribution_current=contrib_curr,
             contribution_previous=contrib_prev,
             last_purchase_date=c.get("last_purchase_date").strftime("%Y-%m-%d") if c.get("last_purchase_date") else None,
             
-            # Legacy Fields (Backward Compatibility)
-            purchase_behavior_score=pur_score,
-            payment_behavior_score=pay_score,
-            rg_behavior_score=rg_score,
-            current_state=c["state"],
-            contribution_score_current=contrib_curr,
-            last_purchased_at=c.get("last_purchase_date").strftime("%Y-%m-%d") if c.get("last_purchase_date") else None,
-            
             deltas=CustomerDatatableDeltas(
+                health_score=round(h_score - h_prev, 4),
+                risk_score=round(risk_score - risk_prev, 4),
+                growth_score=round(g_score - g_prev, 4),
                 trust_score=round(t_score - t_prev, 4),
-                purchase_behavior_score=round(pur_score - pur_prev, 4),
-                payment_behavior_score=round(pay_score - pay_prev, 4),
-                rg_behavior_score=round(rg_score - rg_prev, 4),
+                opportunity_score=round(opp_score - opp_prev, 4),
+                credit_score=round(cred_score - cred_prev, 4),
+                collection_score=round(coll_score - coll_prev, 4),
+                relationship_score=round(rel_score - rel_prev, 4),
                 contribution_score=round(contrib_curr - contrib_prev, 4),
                 outstanding_delta=calculate_pct_delta(out_curr, out_prev)
             )
@@ -374,14 +402,15 @@ async def list_customers_datatable(
             "sort_order": sort_order
         },
         "filters": {
-            "overall_grade": overall_grade,
             "current_state": current_state,
+            "health_score_range": [health_score_min, health_score_max],
+            "risk_score_range": [risk_score_min, risk_score_max],
+            "growth_score_range": [growth_score_min, growth_score_max],
             "trust_score_range": [trust_score_min, trust_score_max],
-            "payment_score_range": [payment_score_min, payment_score_max],
-            "purchase_score_range": [purchase_score_min, purchase_score_max],
-            "payment_behavior_range": [payment_behavior_min, payment_behavior_max],
-            "purchase_behavior_range": [purchase_behavior_min, purchase_behavior_max],
-            "rg_score_range": [rg_score_min, rg_score_max],
+            "opportunity_score_range": [opportunity_score_min, opportunity_score_max],
+            "credit_score_range": [credit_score_min, credit_score_max],
+            "collection_score_range": [collection_score_min, collection_score_max],
+            "relationship_score_range": [relationship_score_min, relationship_score_max],
             "contribution_range": [contribution_min, contribution_max],
             "last_purchase_date_range": [
                 last_purchase_date_start.strftime("%Y-%m-%d") if last_purchase_date_start else None,
@@ -412,20 +441,23 @@ async def export_customers_csv(
     sort_by: str = Query("trust_score", description="Field to sort by"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
     search: str | None = Query(None, description="Fuzzy search by customer ID or name"),
-    overall_grade: str | None = Query(None, description="Filter by overall grade (A, B, C, etc.)"),
     current_state: str | None = Query(None, description="Filter by behavioral state"),
+    health_score_min: float | None = Query(None, description="Min health score"),
+    health_score_max: float | None = Query(None, description="Max health score"),
+    risk_score_min: float | None = Query(None, description="Min risk score"),
+    risk_score_max: float | None = Query(None, description="Max risk score"),
+    growth_score_min: float | None = Query(None, description="Min growth score"),
+    growth_score_max: float | None = Query(None, description="Max growth score"),
     trust_score_min: float | None = Query(None, description="Min trust score"),
     trust_score_max: float | None = Query(None, description="Max trust score"),
-    payment_score_min: float | None = Query(None, description="Min payment score"),
-    payment_score_max: float | None = Query(None, description="Max payment score"),
-    purchase_score_min: float | None = Query(None, description="Min purchase score"),
-    purchase_score_max: float | None = Query(None, description="Max purchase score"),
-    payment_behavior_min: float | None = Query(None, description="Min payment behavior score"),
-    payment_behavior_max: float | None = Query(None, description="Max payment behavior score"),
-    purchase_behavior_min: float | None = Query(None, description="Min purchase behavior score"),
-    purchase_behavior_max: float | None = Query(None, description="Max purchase behavior score"),
-    rg_score_min: float | None = Query(None, description="Min RG score"),
-    rg_score_max: float | None = Query(None, description="Max RG score"),
+    opportunity_score_min: float | None = Query(None, description="Min opportunity score"),
+    opportunity_score_max: float | None = Query(None, description="Max opportunity score"),
+    credit_score_min: float | None = Query(None, description="Min credit score"),
+    credit_score_max: float | None = Query(None, description="Max credit score"),
+    collection_score_min: float | None = Query(None, description="Min collection score"),
+    collection_score_max: float | None = Query(None, description="Max collection score"),
+    relationship_score_min: float | None = Query(None, description="Min relationship score"),
+    relationship_score_max: float | None = Query(None, description="Max relationship score"),
     contribution_min: float | None = Query(None, description="Min contribution score"),
     contribution_max: float | None = Query(None, description="Max contribution score"),
     last_purchase_date_start: date | None = Query(None, description="Start date of last purchase"),
@@ -447,20 +479,23 @@ async def export_customers_csv(
         sort_by=sort_by,
         sort_order=sort_order,
         search=search,
-        overall_grade=overall_grade,
         current_state=current_state,
+        health_score_min=health_score_min,
+        health_score_max=health_score_max,
+        risk_score_min=risk_score_min,
+        risk_score_max=risk_score_max,
+        growth_score_min=growth_score_min,
+        growth_score_max=growth_score_max,
         trust_score_min=trust_score_min,
         trust_score_max=trust_score_max,
-        payment_score_min=payment_score_min,
-        payment_score_max=payment_score_max,
-        purchase_score_min=purchase_score_min,
-        purchase_score_max=purchase_score_max,
-        payment_behavior_min=payment_behavior_min,
-        payment_behavior_max=payment_behavior_max,
-        purchase_behavior_min=purchase_behavior_min,
-        purchase_behavior_max=purchase_behavior_max,
-        rg_score_min=rg_score_min,
-        rg_score_max=rg_score_max,
+        opportunity_score_min=opportunity_score_min,
+        opportunity_score_max=opportunity_score_max,
+        credit_score_min=credit_score_min,
+        credit_score_max=credit_score_max,
+        collection_score_min=collection_score_min,
+        collection_score_max=collection_score_max,
+        relationship_score_min=relationship_score_min,
+        relationship_score_max=relationship_score_max,
         contribution_min=contribution_min,
         contribution_max=contribution_max,
         last_purchase_date_start=last_purchase_date_start,
@@ -470,9 +505,10 @@ async def export_customers_csv(
     async def generate_csv():
         # CSV Headers
         headers = [
-            "Customer ID", "Customer Name", "City", "Trust Score", 
-            "Purchase Score", "Payment Score", "RG Score", "State",
-            "Outstanding", "Contribution", "Last Purchase Date"
+            "Customer ID", "Customer Name", "City", 
+            "Health Score", "Risk Score", "Growth Score", "Trust Score", 
+            "Opportunity Score", "Credit Score", "Collection Score", "Relationship Score", 
+            "State", "Outstanding", "Contribution", "Last Purchase Date"
         ]
         
         output = io.StringIO()
@@ -490,10 +526,14 @@ async def export_customers_csv(
                 row.customer_id,
                 row.customer_name,
                 row.city,
+                round(row.health_score, 4) if row.health_score else 0.0,
+                round(row.risk_score, 4) if row.risk_score else 0.0,
+                round(row.growth_score, 4) if row.growth_score else 0.0,
                 round(row.trust_score, 4) if row.trust_score else 0.0,
-                round(row.purchase_score, 4) if row.purchase_score else 0.0,
-                round(row.payment_score, 4) if row.payment_score else 0.0,
-                round(row.rg_score, 4) if row.rg_score else 0.0,
+                round(row.opportunity_score, 4) if row.opportunity_score else 0.0,
+                round(row.credit_score, 4) if row.credit_score else 0.0,
+                round(row.collection_score, 4) if row.collection_score else 0.0,
+                round(row.relationship_score, 4) if row.relationship_score else 0.0,
                 row.state,
                 round(row.outstanding_current, 2) if row.outstanding_current else 0.0,
                 round(row.contribution_current, 2) if row.contribution_current else 0.0,
@@ -553,14 +593,23 @@ async def get_customer_profile(
     
     if is_default_window:
         # PURE CACHE RETURN: No runtime calculations, no joins, no ledger scans.
+        h_score = cached_intel.health_score or 0.0
+        h_prev = cached_intel.health_previous or 0.0
+        risk_score = cached_intel.risk_score or 0.0
+        risk_prev = cached_intel.risk_previous or 0.0
+        g_score = cached_intel.growth_score or 0.0
+        g_prev = cached_intel.growth_previous or 0.0
         t_score = cached_intel.trust_score or 0.0
         t_prev = cached_intel.trust_previous or 0.0
-        pur_val = cached_intel.purchase_score or 0.0
-        pur_prev = cached_intel.purchase_previous or 0.0
-        pay_val = cached_intel.payment_score or 0.0
-        pay_prev = cached_intel.payment_previous or 0.0
-        rg_val = cached_intel.rg_score or 0.0
-        rg_prev = cached_intel.rg_previous or 0.0
+        opp_score = cached_intel.opportunity_score or 0.0
+        opp_prev = cached_intel.opportunity_previous or 0.0
+        cred_score = cached_intel.credit_score or 0.0
+        cred_prev = cached_intel.credit_previous or 0.0
+        coll_score = cached_intel.collection_score or 0.0
+        coll_prev = cached_intel.collection_previous or 0.0
+        rel_score = cached_intel.relationship_score or 0.0
+        rel_prev = cached_intel.relationship_previous or 0.0
+        
         out_curr = cached_intel.outstanding_current or 0.0
         out_prev = cached_intel.outstanding_previous or 0.0
         contrib_curr = cached_intel.contribution_current or 0.0
@@ -577,18 +626,26 @@ async def get_customer_profile(
                 customer_name=cached_intel.customer_name,
                 city=cached_intel.city,
                 scores=CustomerScoreSchema(
+                    health_score=h_score,
+                    risk_score=risk_score,
+                    growth_score=g_score,
                     trust_score=t_score,
-                    purchase_behavior_score=pur_val,
-                    payment_behavior_score=pay_val,
-                    rg_behavior_score=rg_val,
+                    opportunity_score=opp_score,
+                    credit_score=cred_score,
+                    collection_score=coll_score,
+                    relationship_score=rel_score,
                     outstanding_current=out_curr,
                     outstanding_previous=out_prev
                 ),
                 deltas=CustomerDeltaSchema(
+                    health_score=round(h_score - h_prev, 4),
+                    risk_score=round(risk_score - risk_prev, 4),
+                    growth_score=round(g_score - g_prev, 4),
                     trust_score=round(t_score - t_prev, 4),
-                    purchase_behavior_score=round(pur_val - pur_prev, 4),
-                    payment_behavior_score=round(pay_val - pay_prev, 4),
-                    rg_behavior_score=round(rg_val - rg_prev, 4),
+                    opportunity_score=round(opp_score - opp_prev, 4),
+                    credit_score=round(cred_score - cred_prev, 4),
+                    collection_score=round(coll_score - coll_prev, 4),
+                    relationship_score=round(rel_score - rel_prev, 4),
                     outstanding_delta=calculate_pct_delta(out_curr, out_prev)
                 ),
                 behavior_state=cached_intel.state or "UNKNOWN",
@@ -677,6 +734,88 @@ async def get_customer_profile(
         metadata=metadata, 
         request=request
     )
+
+
+# --- Predictions & Recommendations Endpoints ---
+
+prediction_service = PredictionService()
+recommendation_service = RecommendationService(prediction_service)
+
+@customer_detail_router.get(
+    "/{id}/predictions",
+    response_model=StandardResponse[dict],
+    responses={
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        403: {"model": ErrorResponse, "description": "Forbidden"},
+        404: {"model": ErrorResponse, "description": "Customer Not Found"},
+    }
+)
+async def get_customer_predictions(
+    id: str,
+    request: Request,
+    version: str | None = Query(None, description="Model version"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Consolidated endpoint to retrieve all predictive dimensions/scores for a customer.
+    """
+    repo = IntelligenceRepository(db)
+    cached_intel = await repo.get_latest_customer_state(id)
+    if not cached_intel:
+        raise StarletteHTTPException(status_code=404, detail=f"Customer {id} not found.")
+
+    try:
+        risk_pred = await prediction_service.get_risk_prediction(db, id, version)
+        growth_pred = await prediction_service.get_growth_prediction(db, id, version)
+        health_pred = await prediction_service.get_health_prediction(db, id, version)
+        churn_pred = await prediction_service.get_churn_prediction(db, id, version)
+        collection_pred = await prediction_service.get_collection_prediction(db, id, version)
+        opportunity_pred = await prediction_service.get_opportunity_prediction(db, id, version)
+
+        data = {
+            "risk": risk_pred.model_dump(),
+            "growth": growth_pred.model_dump(),
+            "health": health_pred.model_dump(),
+            "churn": churn_pred.model_dump(),
+            "collection": collection_pred.model_dump(),
+            "opportunity": opportunity_pred.model_dump(),
+        }
+        return success_response("All predictions retrieved successfully", data=data, request=request)
+    except KeyError as e:
+        raise StarletteHTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise StarletteHTTPException(status_code=500, detail=f"Inference execution failed: {str(e)}") from e
+
+
+@customer_detail_router.get(
+    "/{id}/recommendations",
+    response_model=StandardResponse[CustomerRecommendations],
+    responses={
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        403: {"model": ErrorResponse, "description": "Forbidden"},
+        404: {"model": ErrorResponse, "description": "Customer Not Found"},
+    }
+)
+async def get_customer_recommendations_endpoint(
+    id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Retrieve automated action recommendations for a customer.
+    """
+    repo = IntelligenceRepository(db)
+    cached_intel = await repo.get_latest_customer_state(id)
+    if not cached_intel:
+        raise StarletteHTTPException(status_code=404, detail=f"Customer {id} not found.")
+
+    try:
+        recs = await recommendation_service.generate_recommendations(db, id)
+        return success_response("Recommendations generated successfully", data=recs.model_dump(), request=request)
+    except Exception as e:
+        raise StarletteHTTPException(status_code=500, detail=f"Recommendation generation failed: {str(e)}") from e
 
 
 # --- Graph Endpoints ---

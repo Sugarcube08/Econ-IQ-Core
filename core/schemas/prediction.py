@@ -32,3 +32,8 @@ class ChurnPrediction(BasePrediction):
 class CollectionPrediction(BasePrediction):
     repayment_probability: float = Field(..., ge=0.0, le=1.0, description="Estimated probability of collection in active billing cycle")
     expected_delay_days: int = Field(..., description="Estimated days past due (DPD) before settlement")
+
+
+class OpportunityPrediction(BasePrediction):
+    opportunity_tier: str = Field(..., description="Categorized opportunity tier: LOW, MEDIUM, HIGH, STIMULUS")
+    expected_upsell_value: float = Field(default=0.0, description="Expected incremental sales volume from upsell/cross-sell")

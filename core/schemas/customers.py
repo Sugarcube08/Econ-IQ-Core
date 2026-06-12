@@ -4,10 +4,14 @@ from pydantic import BaseModel
 
 
 class CustomerDatatableDeltas(BaseModel):
+    health_score: float | None = 0.0
+    risk_score: float | None = 0.0
+    growth_score: float | None = 0.0
     trust_score: float | None = 0.0
-    purchase_behavior_score: float | None = 0.0
-    payment_behavior_score: float | None = 0.0
-    rg_behavior_score: float | None = 0.0
+    opportunity_score: float | None = 0.0
+    credit_score: float | None = 0.0
+    collection_score: float | None = 0.0
+    relationship_score: float | None = 0.0
     contribution_score: float | None = 0.0
     outstanding_delta: float | None = 0.0
 
@@ -17,26 +21,22 @@ class CustomerDatatableRow(BaseModel):
     customer_name: str | None = None
     city: str | None = None
     
-    # Standard Fields
+    # 8 Canonical Scores
+    health_score: float | None = 0.0
+    risk_score: float | None = 0.0
+    growth_score: float | None = 0.0
     trust_score: float | None = 0.0
-    purchase_score: float | None = 0.0
-    payment_score: float | None = 0.0
-    rg_score: float | None = 0.0
+    opportunity_score: float | None = 0.0
+    credit_score: float | None = 0.0
+    collection_score: float | None = 0.0
+    relationship_score: float | None = 0.0
+    
     state: str | None = None
-    overall_grade: str | None = None
     outstanding_current: float | None = 0.0
     outstanding_previous: float | None = 0.0
     contribution_current: float | None = 0.0
     contribution_previous: float | None = 0.0
     last_purchase_date: str | None = None
-    
-    # Legacy Fields (Backward Compatibility)
-    purchase_behavior_score: float | None = 0.0
-    payment_behavior_score: float | None = 0.0
-    rg_behavior_score: float | None = 0.0
-    current_state: str | None = None
-    contribution_score_current: float | None = 0.0
-    last_purchased_at: str | None = None
     
     deltas: CustomerDatatableDeltas
 
@@ -68,19 +68,27 @@ class CustomerDatatableResponseData(BaseModel):
 
 
 class CustomerScoreSchema(BaseModel):
+    health_score: float | None = 0.0
+    risk_score: float | None = 0.0
+    growth_score: float | None = 0.0
     trust_score: float | None = 0.0
-    purchase_behavior_score: float | None = 0.0
-    payment_behavior_score: float | None = 0.0
-    rg_behavior_score: float | None = 0.0
+    opportunity_score: float | None = 0.0
+    credit_score: float | None = 0.0
+    collection_score: float | None = 0.0
+    relationship_score: float | None = 0.0
     outstanding_current: float | None = 0.0
     outstanding_previous: float | None = 0.0
 
 
 class CustomerDeltaSchema(BaseModel):
+    health_score: float | None = 0.0
+    risk_score: float | None = 0.0
+    growth_score: float | None = 0.0
     trust_score: float | None = 0.0
-    purchase_behavior_score: float | None = 0.0
-    payment_behavior_score: float | None = 0.0
-    rg_behavior_score: float | None = 0.0
+    opportunity_score: float | None = 0.0
+    credit_score: float | None = 0.0
+    collection_score: float | None = 0.0
+    relationship_score: float | None = 0.0
     outstanding_delta: float | None = 0.0
 
 

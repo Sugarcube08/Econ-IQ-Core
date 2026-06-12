@@ -5,13 +5,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.feature_store.engineer import FeatureEngineer
 from core.ledger.context import LedgerContextService
-from core.prediction.interfaces import IModelEstimator
+from core.prediction.contracts.prediction_contracts import ModelMetadataContract
+from core.prediction.interfaces.estimator import IModelEstimator
+from core.prediction.monitoring.monitor import prediction_monitor
+from core.prediction.registry.model_registry import model_registry
 from core.schemas.intelligence import AnalysisContext
 from core.schemas.prediction import (
     ChurnPrediction,
     CollectionPrediction,
     GrowthPrediction,
     HealthPrediction,
+    OpportunityPrediction,
     RiskPrediction,
 )
 
@@ -55,6 +59,14 @@ class DefaultRiskEstimator(IModelEstimator):
             risk_level=risk_level,
         )
 
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultRiskEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["sales_window", "payments_window", "penalty_window"],
+        )
+
 
 class DefaultGrowthEstimator(IModelEstimator):
     def predict(self, customer_id: str, features_df: pl.DataFrame) -> GrowthPrediction:
@@ -91,6 +103,14 @@ class DefaultGrowthEstimator(IModelEstimator):
             features_snapshot=features_df.to_dicts()[0] if not features_df.is_empty() else {},
             key_drivers=["sales_recent_velocity"],
             growth_potential=potential,
+        )
+
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultGrowthEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["sales_window", "sales_recent"],
         )
 
 
@@ -134,6 +154,14 @@ class DefaultHealthEstimator(IModelEstimator):
             health_grade=grade,
         )
 
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultHealthEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["sales_window", "payments_window", "penalty_window"],
+        )
+
 
 class DefaultChurnEstimator(IModelEstimator):
     def predict(self, customer_id: str, features_df: pl.DataFrame) -> ChurnPrediction:
@@ -161,6 +189,14 @@ class DefaultChurnEstimator(IModelEstimator):
             features_snapshot=features_df.to_dicts()[0] if not features_df.is_empty() else {},
             key_drivers=["days_since_last_purchase"],
             is_churn_risk=is_churn,
+        )
+
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultChurnEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["last_purchased_at"],
         )
 
 
@@ -192,49 +228,124 @@ class DefaultCollectionEstimator(IModelEstimator):
             expected_delay_days=delay,
         )
 
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultCollectionEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["sales_window", "payments_window"],
+        )
+
+
+class DefaultOpportunityEstimator(IModelEstimator):
+    def predict(self, customer_id: str, features_df: pl.DataFrame) -> OpportunityPrediction:
+        if features_df.is_empty():
+            score = 0.5
+            tier = "MEDIUM"
+            val = 0.0
+        else:
+            row = features_df.tail(1).to_dicts()[0]
+            sales = row.get("sales_window") or 0.0
+            diversity = row.get("category_diversity_count") or 1.0
+
+            # High sales + low diversity = STIMULUS upsell opportunity
+            if sales > 50000.0 and diversity <= 2:
+                score = 0.85
+                tier = "STIMULUS"
+                val = sales * 0.25
+            elif sales > 10000.0 and diversity <= 4:
+                score = 0.65
+                tier = "HIGH"
+                val = sales * 0.15
+            elif sales > 0:
+                score = 0.45
+                tier = "MEDIUM"
+                val = sales * 0.05
+            else:
+                score = 0.15
+                tier = "LOW"
+                val = 0.0
+
+        return OpportunityPrediction(
+            customer_id=customer_id,
+            prediction_date=datetime.now(UTC).date(),
+            score=round(score, 4),
+            confidence=0.82,
+            features_snapshot=features_df.to_dicts()[0] if not features_df.is_empty() else {},
+            key_drivers=["sales_vs_category_diversity"],
+            opportunity_tier=tier,
+            expected_upsell_value=round(val, 2),
+        )
+
+    def get_metadata(self) -> ModelMetadataContract:
+        return ModelMetadataContract(
+            model_name="DefaultOpportunityEstimator",
+            model_version="1.0.0",
+            framework="HeuristicRules",
+            features_required=["sales_window", "category_diversity_count"],
+        )
+
+
+# Register baseline default models under registry version 1.0.0
+model_registry.register_model("RISK", "1.0.0", DefaultRiskEstimator())
+model_registry.register_model("GROWTH", "1.0.0", DefaultGrowthEstimator())
+model_registry.register_model("HEALTH", "1.0.0", DefaultHealthEstimator())
+model_registry.register_model("CHURN", "1.0.0", DefaultChurnEstimator())
+model_registry.register_model("COLLECTION", "1.0.0", DefaultCollectionEstimator())
+model_registry.register_model("OPPORTUNITY", "1.0.0", DefaultOpportunityEstimator())
+
 
 class PredictionService:
     """
     Orchestrates ML features generation and execution of prediction models.
+    Supports dynamic model swapping and telemetry hooks.
     """
 
-    def __init__(
-        self,
-        risk_model: IModelEstimator | None = None,
-        growth_model: IModelEstimator | None = None,
-        health_model: IModelEstimator | None = None,
-        churn_model: IModelEstimator | None = None,
-        collection_model: IModelEstimator | None = None,
-    ):
+    def __init__(self):
         self.ledger_context = LedgerContextService()
         self.feature_engineer = FeatureEngineer()
-        
-        # Load custom models or fallback to default rule-based predictors
-        self.risk_model = risk_model or DefaultRiskEstimator()
-        self.growth_model = growth_model or DefaultGrowthEstimator()
-        self.health_model = health_model or DefaultHealthEstimator()
-        self.churn_model = churn_model or DefaultChurnEstimator()
-        self.collection_model = collection_model or DefaultCollectionEstimator()
 
-    async def get_risk_prediction(self, session: AsyncSession, customer_id: str) -> RiskPrediction:
+    async def get_risk_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> RiskPrediction:
         features = await self._load_features(session, customer_id)
-        return self.risk_model.predict(customer_id, features)
+        model = model_registry.get_model("RISK", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "RISK", model.get_metadata().model_version, prediction)
+        return prediction
 
-    async def get_growth_prediction(self, session: AsyncSession, customer_id: str) -> GrowthPrediction:
+    async def get_growth_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> GrowthPrediction:
         features = await self._load_features(session, customer_id)
-        return self.growth_model.predict(customer_id, features)
+        model = model_registry.get_model("GROWTH", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "GROWTH", model.get_metadata().model_version, prediction)
+        return prediction
 
-    async def get_health_prediction(self, session: AsyncSession, customer_id: str) -> HealthPrediction:
+    async def get_health_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> HealthPrediction:
         features = await self._load_features(session, customer_id)
-        return self.health_model.predict(customer_id, features)
+        model = model_registry.get_model("HEALTH", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "HEALTH", model.get_metadata().model_version, prediction)
+        return prediction
 
-    async def get_churn_prediction(self, session: AsyncSession, customer_id: str) -> ChurnPrediction:
+    async def get_churn_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> ChurnPrediction:
         features = await self._load_features(session, customer_id)
-        return self.churn_model.predict(customer_id, features)
+        model = model_registry.get_model("CHURN", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "CHURN", model.get_metadata().model_version, prediction)
+        return prediction
 
-    async def get_collection_prediction(self, session: AsyncSession, customer_id: str) -> CollectionPrediction:
+    async def get_collection_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> CollectionPrediction:
         features = await self._load_features(session, customer_id)
-        return self.collection_model.predict(customer_id, features)
+        model = model_registry.get_model("COLLECTION", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "COLLECTION", model.get_metadata().model_version, prediction)
+        return prediction
+
+    async def get_opportunity_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> OpportunityPrediction:
+        features = await self._load_features(session, customer_id)
+        model = model_registry.get_model("OPPORTUNITY", version)
+        prediction = model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "OPPORTUNITY", model.get_metadata().model_version, prediction)
+        return prediction
 
     async def _load_features(self, session: AsyncSession, customer_id: str) -> pl.DataFrame:
         """Loads customer timeline and aggregates features."""

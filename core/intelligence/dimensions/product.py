@@ -4,7 +4,7 @@ from loguru import logger
 
 class ProductDimensionEngine:
     """
-    Dimension 5: Product Behavior
+    Dimension 5: Product Behavior (Consolidated: Product + Concentration)
     Focus: Catalog penetration and concentration risk.
     """
     def compute(self, features_df: pl.DataFrame) -> pl.DataFrame:
@@ -14,9 +14,43 @@ class ProductDimensionEngine:
 
         logger.debug("Computing Dimension 5: Product Behavior")
 
-        df = features_df.select(["customer_id", "date"])
+        df = features_df.select(
+            [
+                "customer_id", 
+                "date", 
+                "category_diversity_count",
+                "product_diversity_count",
+                "sales_events_window"
+            ]
+        )
 
-        # Placeholder: Assume 0.5 until product category features are fully materialized in FeatureEngineer
-        df = df.with_columns(pl.lit(0.5).alias("dim_product"))
+        df = df.with_columns(
+            [
+                pl.col("category_diversity_count").fill_null(0),
+                pl.col("product_diversity_count").fill_null(0),
+                pl.col("sales_events_window").fill_null(1),
+            ]
+        )
+
+        # Diversification / SKU Breadth
+        # Assume > 5 categories is high diversity
+        df = df.with_columns(
+            (pl.col("category_diversity_count") / 5.0).clip(0, 1).alias("category_diversity_score"),
+            # Products per sales event (Basket Complexity / SKU Breadth)
+            pl.when(pl.col("sales_events_window") > 0)
+            .then((pl.col("product_diversity_count") / pl.col("sales_events_window")).clip(0, 5) / 5.0)
+            .otherwise(0.0)
+            .alias("basket_complexity_score")
+        )
+
+        w_cat, w_basket = 0.6, 0.4
+        
+        df = df.with_columns(
+            (
+                pl.col("category_diversity_score") * w_cat +
+                pl.col("basket_complexity_score") * w_basket
+            ).clip(0, 1).alias("dim_product")
+        )
 
         return df.select(["customer_id", "date", "dim_product"])
+

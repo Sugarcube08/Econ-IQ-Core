@@ -16,13 +16,14 @@ class MetaScoreEngine:
             "opportunity_score": pl.Float64,
             "trust_score": pl.Float64,
             "health_score": pl.Float64,
-            "strategic_value_score": pl.Float64,
-            "stability_score": pl.Float64,
+            "credit_score": pl.Float64,
+            "collection_score": pl.Float64,
+            "relationship_score": pl.Float64,
         }
         if dimensions_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Meta Scores from 12 Dimensions")
+        logger.debug("Computing Meta Scores from B2B Dimensions")
 
         df = dimensions_df.select(
             [
@@ -35,11 +36,7 @@ class MetaScoreEngine:
                 "dim_product",
                 "dim_friction",
                 "dim_growth",
-                "dim_stability",
-                "dim_value",
-                "dim_concentration",
-                "dim_payment_mode",
-                "dim_maturity"
+                "dim_stability"
             ]
         )
 
@@ -53,79 +50,88 @@ class MetaScoreEngine:
                 pl.col("dim_product").fill_null(0.5),
                 pl.col("dim_friction").fill_null(1.0),
                 pl.col("dim_growth").fill_null(0.5),
-                pl.col("dim_stability").fill_null(0.5),
-                pl.col("dim_value").fill_null(0.0),
-                pl.col("dim_concentration").fill_null(0.5),
-                pl.col("dim_payment_mode").fill_null(0.5),
-                pl.col("dim_maturity").fill_null(0.0)
+                pl.col("dim_stability").fill_null(0.5)
             ]
         )
 
-        # 1. Risk Score: Creditworthiness (High = Safe)
+        # 1. Health Score: Overall account condition
+        # Health = 0.40 * Activity + 0.35 * (1 - Friction) + 0.25 * Stability
         df = df.with_columns(
             (
-                pl.col("dim_discipline") * 0.35 +
-                pl.col("dim_credit") * 0.35 +
-                pl.col("dim_friction") * 0.15 +
-                pl.col("dim_stability") * 0.15
-            ).clip(0, 1).alias("risk_score")
-        )
-
-        # 2. Growth Score: Scaling potential
-        df = df.with_columns(
-            (
-                pl.col("dim_growth") * 0.40 +
-                pl.col("dim_activity") * 0.30 +
-                pl.col("dim_concentration") * 0.15 + # Portfolio diversity
-                pl.col("dim_value") * 0.15
-            ).clip(0, 1).alias("growth_score")
-        )
-
-        # 3. Opportunity Score: Upsell value
-        df = df.with_columns(
-            (
-                pl.col("dim_growth") * 0.40 +
                 pl.col("dim_activity") * 0.40 +
-                pl.col("dim_value") * 0.20
-            ).clip(0, 1).alias("opportunity_score")
-        )
-
-        # 4. Trust Score: Terms & Conditions reliability
-        df = df.with_columns(
-            (
-                pl.col("dim_discipline") * 0.40 +
-                pl.col("dim_stability") * 0.30 +
-                pl.col("dim_relationship") * 0.20 +
-                pl.col("dim_payment_mode") * 0.10
-            ).clip(0, 1).alias("trust_score")
-        )
-
-        # 5. Health Score: Overall account condition
-        df = df.with_columns(
-            (
-                pl.col("dim_discipline") * 0.30 +
-                pl.col("dim_activity") * 0.30 +
-                pl.col("dim_friction") * 0.20 +
-                pl.col("dim_stability") * 0.20
+                pl.col("dim_friction") * 0.35 +
+                pl.col("dim_stability") * 0.25
             ).clip(0, 1).alias("health_score")
         )
 
-        # 6. Strategic Value Score: Priority servicing
+        # 2. Risk Score: Credit default and operational trade risk (High = Risky/Bad)
+        # Risk = 0.40 * (1 - Credit) + 0.40 * (1 - Discipline) + 0.20 * (1 - Stability)
         df = df.with_columns(
             (
-                pl.col("dim_value") * 0.50 +
-                pl.col("dim_relationship") * 0.30 +
-                pl.col("dim_maturity") * 0.20
-            ).clip(0, 1).alias("strategic_value_score")
+                (1.0 - pl.col("dim_credit")) * 0.40 +
+                (1.0 - pl.col("dim_discipline")) * 0.40 +
+                (1.0 - pl.col("dim_stability")) * 0.20
+            ).clip(0, 1).alias("risk_score")
         )
 
-        # 7. Stability Score: Forecast reliability
+        # 3. Growth Score: Scaling potential
+        # Growth = 0.50 * Growth + 0.30 * Product + 0.20 * Activity
         df = df.with_columns(
             (
-                pl.col("dim_stability") * 0.50 +
-                pl.col("dim_maturity") * 0.30 +
-                pl.col("dim_discipline") * 0.20
-            ).clip(0, 1).alias("stability_score")
+                pl.col("dim_growth") * 0.50 +
+                pl.col("dim_product") * 0.30 +
+                pl.col("dim_activity") * 0.20
+            ).clip(0, 1).alias("growth_score")
+        )
+
+        # 4. Trust Score: Terms compliance reliability
+        # Trust = 0.50 * Discipline + 0.30 * Relationship + 0.20 * Stability
+        df = df.with_columns(
+            (
+                pl.col("dim_discipline") * 0.50 +
+                pl.col("dim_relationship") * 0.30 +
+                pl.col("dim_stability") * 0.20
+            ).clip(0, 1).alias("trust_score")
+        )
+
+        # 5. Opportunity Score: Upsell value
+        # Opportunity = 0.50 * (1 - Product) + 0.30 * Growth + 0.20 * Relationship
+        df = df.with_columns(
+            (
+                (1.0 - pl.col("dim_product")) * 0.50 +
+                pl.col("dim_growth") * 0.30 +
+                pl.col("dim_relationship") * 0.20
+            ).clip(0, 1).alias("opportunity_score")
+        )
+
+        # 6. Credit Score: Approved risk limit allocation potential (High = Good/Safe for limits)
+        # Credit = 0.40 * Trust + 0.40 * (1 - Risk) + 0.20 * Activity
+        df = df.with_columns(
+            (
+                pl.col("trust_score") * 0.40 +
+                (1.0 - pl.col("risk_score")) * 0.40 +
+                pl.col("dim_activity") * 0.20
+            ).clip(0, 1).alias("credit_score")
+        )
+
+        # 7. Collection Score: Recovery priority and speed index
+        # Collection = 0.50 * (1 - Discipline) + 0.30 * Risk + 0.20 * Activity
+        df = df.with_columns(
+            (
+                (1.0 - pl.col("dim_discipline")) * 0.50 +
+                pl.col("risk_score") * 0.30 +
+                pl.col("dim_activity") * 0.20
+            ).clip(0, 1).alias("collection_score")
+        )
+
+        # 8. Relationship Score: Partnership longevity and tenure
+        # Relationship = 0.40 * Relationship + 0.40 * Stability + 0.20 * Activity
+        df = df.with_columns(
+            (
+                pl.col("dim_relationship") * 0.40 +
+                pl.col("dim_stability") * 0.40 +
+                pl.col("dim_activity") * 0.20
+            ).clip(0, 1).alias("relationship_score")
         )
 
         return df.select(
@@ -137,7 +143,9 @@ class MetaScoreEngine:
                 "opportunity_score", 
                 "trust_score",
                 "health_score",
-                "strategic_value_score",
-                "stability_score"
+                "credit_score",
+                "collection_score",
+                "relationship_score"
             ]
         )
+
