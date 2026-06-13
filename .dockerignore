@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Virtual Environment
+.venv
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tests and Linters
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/.pytest_cache/
+
+# Docker/Compose configs (not needed inside container)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Local Environment Secrets
+.env
+*.pem
+private.pem
+public.pem
+private-prod.pem
+public-prod.pem
+api-key.pem
+bearer.pem

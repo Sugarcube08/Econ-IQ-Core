@@ -1,6 +1,6 @@
 # Organization Assumption Extraction
 
-This document isolates and audits every organization-specific rule, threshold, classification, weight, and formula that is currently hardcoded in the legacy VGIS codebase.
+This document isolates and audits every organization-specific rule, threshold, classification, weight, and formula that is currently hardcoded in the legacy econiq codebase.
 
 ---
 

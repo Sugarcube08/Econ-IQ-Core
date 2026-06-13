@@ -32,8 +32,8 @@ from core.storage.redis import redis_manager
 async def lifespan(app: FastAPI):
     # 1. Startup Logic
     setup_logging()
-    logger.info("Initializing VGIS Hardened Backend...")
-    
+    logger.info("Initializing econiq Hardened Backend...")
+
     # Strict Production Validation
     settings.validate_production()
 
@@ -65,19 +65,21 @@ async def lifespan(app: FastAPI):
     if settings.ENABLE_BACKGROUND_WORKERS:
         logger.info("Starting integrated background workers...")
         queue_worker = IntelligenceQueueWorker()
-        
+
         # Start Sync and Intelligence loops
         background_tasks.append(asyncio.create_task(sync_pipeline.run_loop(poll_interval=settings.SYNC_POLL_INTERVAL)))
-        background_tasks.append(asyncio.create_task(queue_worker.run(poll_interval=settings.INTELLIGENCE_POLL_INTERVAL)))
+        background_tasks.append(
+            asyncio.create_task(queue_worker.run(poll_interval=settings.INTELLIGENCE_POLL_INTERVAL))
+        )
         logger.info("Integrated workers operational.")
 
-    logger.info("VGIS Backend Operational.")
+    logger.info("econiq Backend Operational.")
 
     yield
 
     # 3. Shutdown Logic
-    logger.info("Shutting down VGIS Backend...")
-    
+    logger.info("Shutting down econiq Backend...")
+
     if background_tasks:
         logger.info("Stopping background workers...")
         for task in background_tasks:
@@ -91,10 +93,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.APP_NAME, 
-    description="Stateful Behavioral Intelligence Runtime - Hardened Production Edition", 
-    version="2.0.0", 
-    lifespan=lifespan
+    title=settings.APP_NAME,
+    description="Stateful Behavioral Intelligence Runtime - Hardened Production Edition",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 # -- EXCEPTION HANDLERS --
@@ -129,17 +131,15 @@ api_v1_router.include_router(customers_listing_router)
 api_v1_router.include_router(customer_detail_router)
 api_v1_router.include_router(dashboard_router)
 
+
 @api_v1_router.get("/health", response_model=StandardResponse[dict])
 async def health_check(request: Request):
     """
     Lightweight health check for infrastructure orchestration.
     """
-    data = {
-        "status": "healthy", 
-        "environment": settings.APP_ENV,
-        "version": "2.0.0"
-    }
+    data = {"status": "healthy", "environment": settings.APP_ENV, "version": "2.0.0"}
     return success_response("System healthy", data=data, request=request)
+
 
 app.include_router(api_v1_router)
 

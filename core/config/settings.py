@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Get the project root directory (VGIS/backend)
+# Get the project root directory (econiq/backend)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Manually load .env
@@ -14,7 +14,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "VGIS Intelligence Backend"
+    APP_NAME: str = "econiq Intelligence Backend"
     APP_ENV: str = "development"
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
@@ -52,15 +52,15 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY: str | None = Field(None, validation_alias="JWT_PUBLIC_KEY")
     JWT_ACCESS_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_EXPIRE_DAYS: int = 7
-    JWT_ISSUER: str = "vgis.intelligence"
-    JWT_AUDIENCE: str = "vgis.api"
+    JWT_ISSUER: str = "econiq.intelligence"
+    JWT_AUDIENCE: str = "econiq.api"
 
     # SMTP
     SMTP_HOST: str = Field("localhost", validation_alias="SMTP_HOST")
     SMTP_PORT: int = Field(1025, validation_alias="SMTP_PORT")
     SMTP_USERNAME: str | None = Field(None, validation_alias="SMTP_USERNAME")
     SMTP_PASSWORD: str | None = Field(None, validation_alias="SMTP_PASSWORD")
-    SMTP_FROM_EMAIL: str = Field("no-reply@vgis.intelligence", validation_alias="SMTP_FROM_EMAIL")
+    SMTP_FROM_EMAIL: str = Field("no-reply@econiq.intelligence", validation_alias="SMTP_FROM_EMAIL")
     SMTP_USE_TLS: bool = Field(False, validation_alias="SMTP_USE_TLS")
 
     # Feature Toggles
@@ -88,19 +88,24 @@ class Settings(BaseSettings):
     ENABLE_AUDIT_LOGGING: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=os.path.join(PROJECT_ROOT, ".env"), 
-        env_file_encoding="utf-8", 
-        extra="ignore",
-        case_sensitive=True
+        env_file=os.path.join(PROJECT_ROOT, ".env"), env_file_encoding="utf-8", extra="ignore", case_sensitive=True
     )
 
     def validate_production(self):
         """Strict validation for production mode."""
         if self.APP_ENV == "production":
-            required = ["REDIS_URL", "JWT_PRIVATE_KEY", "JWT_PUBLIC_KEY", "OTP_PEPPER", "API_KEY_PEPPER", "REFRESH_TOKEN_PEPPER"]
+            required = [
+                "REDIS_URL",
+                "JWT_PRIVATE_KEY",
+                "JWT_PUBLIC_KEY",
+                "OTP_PEPPER",
+                "API_KEY_PEPPER",
+                "REFRESH_TOKEN_PEPPER",
+            ]
             for field in required:
                 if getattr(self, field) is None:
                     raise ValueError(f"CRITICAL: {field} must be set in production")
+
 
 settings = Settings()
 # In production, we call settings.validate_production() in main.py startup

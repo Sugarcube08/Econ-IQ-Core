@@ -22,7 +22,7 @@ This audit documents code issues, architectural bottlenecks, and security bugs p
 *   **Remediation:** Modify the mapping logic to write valid transactions as `is_ok = 0` and invalid ones as `is_ok = 1`. Run a migration SQL script to swap `is_ok` values in `event_ledger`, `raw_sales`, `raw_receipts`, and `raw_rg`.
 
 ### 2.2. Development Schema Discrepancy (HIGH)
-*   **Context:** The Development database (`vgis_db`) was never upgraded to include the `is_ok` column in `event_ledger`.
+*   **Context:** The Development database (`econiq_db`) was never upgraded to include the `is_ok` column in `event_ledger`.
 *   **Impact:** The recomputation queue worker crashed on every cycle, flooding the queue with failed tasks.
 *   **Severity:** `HIGH`
 *   **Remediation:** Execute a DDL migration adding the `is_ok` column and its composite index (`idx_ledger_customer_date`) to the DEV database.

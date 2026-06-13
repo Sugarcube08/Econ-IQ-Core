@@ -1,6 +1,6 @@
 # System Decomposition & Core Classification
 
-This document decomposes the legacy VGIS backend codebase, classifying every module, model, service, controller, and job into four distinct architecture layers. This classification separates the invariant platform mechanics from the organization-specific business rules and technical debt.
+This document decomposes the legacy econiq backend codebase, classifying every module, model, service, controller, and job into four distinct architecture layers. This classification separates the invariant platform mechanics from the organization-specific business rules and technical debt.
 
 ---
 
@@ -19,7 +19,7 @@ To isolate a reusable platform kernel (**Econiq Core**), all codebase elements a
 
 ## 2. Directory Tree & Module Mapping
 
-The VGIS backend is organized as a single FastAPI repository with asynchronous background processing loops. The directory map below identifies the categorization of each primary codebase file:
+The econiq backend is organized as a single FastAPI repository with asynchronous background processing loops. The directory map below identifies the categorization of each primary codebase file:
 
 ```text
 ref/

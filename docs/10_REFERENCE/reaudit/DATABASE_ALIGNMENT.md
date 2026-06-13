@@ -1,14 +1,14 @@
 # Database Schema Alignment & Ingestion Mapping
 
-This document maps the legacy VGIS database models to the actual **Econiq Core** data source tables (`customers`, `raw_sales`, `raw_payments`, and `raw_returns`) and defines the schema conversions required.
+This document maps the legacy econiq database models to the actual **Econiq Core** data source tables (`customers`, `raw_sales`, `raw_payments`, and `raw_returns`) and defines the schema conversions required.
 
 ---
 
 ## 1. Raw Ingestion Mapping Matrix
 
-The ingestion pipeline will shift from the legacy VGIS raw tables to the Econiq database schema as follows:
+The ingestion pipeline will shift from the legacy econiq raw tables to the Econiq database schema as follows:
 
-| Legacy VGIS Table | Econiq Target Table | Primary Mapping Fields | Action | Semantic Mapping Rule |
+| Legacy econiq Table | Econiq Target Table | Primary Mapping Fields | Action | Semantic Mapping Rule |
 | :--- | :--- | :--- | :---: | :--- |
 | `raw_customers` | `customers` | `customer_id` $\rightarrow$ `customer_id`<br>`customer_name` $\rightarrow$ `customer_name`<br>`opening_balance` $\rightarrow$ `opening_balance` | **Rename & Flatten** | Flatten city fields; map city name directly if available in the `customers` table instead of joining a separate `raw_cities` lookup. |
 | `raw_sales` | `raw_sales` | `customer_id` $\rightarrow$ `customer_id`<br>`bill_date` $\rightarrow$ `event_date`<br>`net_amount` $\rightarrow$ `amount`<br>`dis_amt` $\rightarrow$ `discount_amount`<br>`is_ok` $\rightarrow$ `is_ok` | **Keep & Wrap** | Standardize date parsing format. Ensure `is_ok` is read correctly as transaction state indicator. |

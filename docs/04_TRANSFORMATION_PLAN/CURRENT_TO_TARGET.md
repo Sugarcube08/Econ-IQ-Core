@@ -1,5 +1,5 @@
 # Current to Target Migration Roadmap
-- **Current State:** VGIS backend running with VGIS database schemas.
+- **Current State:** econiq backend running with econiq database schemas.
 - **Target State:** Econiq backend running on Railway with generalized database schemas.
 - **Gap Analysis:** Requires code refactoring, database updates, and UI integrations.
 - **Recommended Actions:** Run the migration script; verify schema updates; test endpoint routes.

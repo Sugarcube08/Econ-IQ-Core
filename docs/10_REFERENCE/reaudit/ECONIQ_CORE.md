@@ -1,6 +1,6 @@
 # Econiq Core Platform Kernel Extraction
 
-This document outlines the components in the legacy VGIS backend that will be preserved as the permanent foundation of the **Econiq Core Platform**. These components are independent of specific client organizations and handle core capabilities like identity, data normalization, ledger materialization, and batch scheduling.
+This document outlines the components in the legacy econiq backend that will be preserved as the permanent foundation of the **Econiq Core Platform**. These components are independent of specific client organizations and handle core capabilities like identity, data normalization, ledger materialization, and batch scheduling.
 
 ---
 

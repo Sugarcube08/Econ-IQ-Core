@@ -8,7 +8,7 @@ This document outlines the engineering roadmaps, work items, and complexity rati
 
 ```mermaid
 flowchart LR
-    subgraph Current State [VGIS Legacy (Analytics)]
+    subgraph Current State [econiq Legacy (Analytics)]
         RawDB[Raw Data Sync] --> Ledger[Ledger Materialization]
         Ledger --> PolarsStat[Polars Rolling Stats]
         PolarsStat --> HardcodedRules[Hardcoded Scoring Rules]

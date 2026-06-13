@@ -14,7 +14,7 @@
 ```
 
 ### Hour 08:00 - 12:00: Database Schema & Index Upgrades
-*   **Task 1:** Execute DDL migrations on the DEV database (`vgis_db`) to add the `is_ok` column and index `idx_ledger_customer_date` to `event_ledger`, correcting the recomputation queue crash.
+*   **Task 1:** Execute DDL migrations on the DEV database (`econiq_db`) to add the `is_ok` column and index `idx_ledger_customer_date` to `event_ledger`, correcting the recomputation queue crash.
 *   **Task 2:** Run SQL update script on both databases to swap the inverted `is_ok` values:
     *   `UPDATE event_ledger SET is_ok = CASE WHEN is_ok = 1 THEN 0 ELSE 1 END;`
 *   **Target Files:** `migrations/versions/add_is_ok_to_dev.py`, `scripts/realignment_migration.sql`.

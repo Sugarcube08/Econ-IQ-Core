@@ -37,7 +37,7 @@ The security and permission system (`app/core/dependencies.py` and `app/core/sec
 
 ### 2.2. Ingestion & Ledger (Refactor / Modify)
 The event ingestion daemon uses database transaction locks (`42069`). We keep this but refactor the ingestion mapper (`dbupdater`) to swap `is_ok` values.
-*   **Current Broken Logic:** Ingestion maps valid transaction keys (`is_Ok = True / -1`) to `is_ok = 1`. The VGIS backend filters out `is_ok = 1` for financial balances.
+*   **Current Broken Logic:** Ingestion maps valid transaction keys (`is_Ok = True / -1`) to `is_ok = 1`. The econiq backend filters out `is_ok = 1` for financial balances.
 *   **Target Correct Logic:** Ingestion maps valid transactions to `is_ok = 0`, ensuring they update outstanding balances and risk indicators correctly.
 
 ### 2.3. ML & Scoring Components (Replace / Build New)

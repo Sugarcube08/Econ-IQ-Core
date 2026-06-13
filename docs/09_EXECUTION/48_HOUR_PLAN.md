@@ -1,5 +1,5 @@
 # 48 Hour Migration Plan
-- **Current State:** VGIS database schemas.
+- **Current State:** econiq database schemas.
 - **Target State:** Aligned databases and configurable scoring.
 - **Gap Analysis:** Need immediate implementation tasks.
 - **Recommended Actions:** Execute DB DDL upgrades; create policy profiles; restructure directories.

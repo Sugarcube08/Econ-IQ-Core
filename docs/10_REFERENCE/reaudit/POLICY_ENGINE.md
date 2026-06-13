@@ -20,7 +20,7 @@ Generic Processing Engines (Polars Vectorized Rules)
 
 ## 2. Policy Schema Specification (`policy_profile.yaml`)
 
-Each organization will run under a specific Policy Profile. Below is the complete YAML specification representing the VGIS default settings, which can be modified for any tenant without code changes:
+Each organization will run under a specific Policy Profile. Below is the complete YAML specification representing the econiq default settings, which can be modified for any tenant without code changes:
 
 ```yaml
 version: "1.0"

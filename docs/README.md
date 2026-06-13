@@ -1,6 +1,6 @@
 # Econiq Core Platform — Documentation Library & Project OS
 
-Welcome to the **Econiq Core Project Operating System**. This library serves as the single source of truth and execution blueprint for transforming the legacy VGIS scoring engine into the generalized, AI-first **Econiq Core Platform** within a 2-week hackathon timeline.
+Welcome to the **Econiq Core Project Operating System**. This library serves as the single source of truth and execution blueprint for transforming the legacy econiq scoring engine into the generalized, AI-first **Econiq Core Platform** within a 2-week hackathon timeline.
 
 ---
 
@@ -43,7 +43,7 @@ Click on the links below to explore the specifications:
 
 ### 📂 [00 - Executive Overview](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW)
 *   📋 **[Project Status & Readiness](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW/PROJECT_STATUS.md)**: Dev completion status (~70% backend, ~90% frontend).
-*   🔑 **[Ground Truth](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW/GROUND_TRUTH.md)**: Realities of the VGIS backend assets.
+*   🔑 **[Ground Truth](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW/GROUND_TRUTH.md)**: Realities of the econiq backend assets.
 *   🎯 **[Executive Summary](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW/EXECUTIVE_SUMMARY.md)**: Feasibility, timelines, and business returns.
 *   🔭 **[Platform Vision](file:///home/sugarcube/Desktop/Documents/Code-Server/Hackathon%20Projects/India-Runs/ECON-IQ/Econ-Core/docs/00_EXECUTIVE_OVERVIEW/VISION.md)**: Commercial Intelligence and Credit OS positioning.
 
