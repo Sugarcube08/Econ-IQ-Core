@@ -1,12 +1,17 @@
+import time
 from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy import desc, func, not_, select
+from sqlalchemy import desc, func, not_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models.state_models import CustomerIntelligence, EventLedger
+
+# Global thread-safe/async-safe TTL caches for organization-wide metrics
+_org_metrics_cache = {}
+_org_sales_cache = {}
 
 
 class CustomerResolutionError(HTTPException):
@@ -25,7 +30,7 @@ class IntelligenceRepository:
 
     async def get_latest_customer_state(self, customer_id: str) -> CustomerIntelligence | None:
         """
-        Fetches the latest materialized intelligence from PostgreSQL.
+        Idempotent retrieval of the latest materialized intelligence from PostgreSQL.
         """
         stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
         res = await self.db.execute(stmt)
@@ -62,7 +67,9 @@ class IntelligenceRepository:
         # Also update customers.behavioral_profile if the customers table exists
         try:
             import uuid
+
             from sqlalchemy import update
+
             from core.storage.postgres import get_reflected_table
 
             customers_tbl = await get_reflected_table("customers", self.db)
@@ -99,7 +106,15 @@ class IntelligenceRepository:
         """
         logger.debug(f"Serving timeline for {customer_id} from PostgreSQL")
         stmt = (
-            select(EventLedger)
+            select(
+                EventLedger.event_id,
+                EventLedger.event_type,
+                EventLedger.event_date,
+                EventLedger.amount,
+                EventLedger.is_ok,
+                EventLedger.customer_sequence_number,
+                EventLedger.metadata_,
+            )
             .where(
                 EventLedger.customer_id == customer_id, 
                 not_(EventLedger.is_voided),
@@ -108,7 +123,7 @@ class IntelligenceRepository:
             .order_by(desc(EventLedger.event_date), desc(EventLedger.customer_sequence_number))
         )
         res = await self.db.execute(stmt)
-        rows = res.scalars().all()
+        rows = res.all()
         return [
             {
                 "event_id": row.event_id,
@@ -143,20 +158,33 @@ class IntelligenceRepository:
         Supports optional customer_id filtering for specific vs organizational contribution.
         MANDATORY: Uses ALL purchase events (ignores is_ok) for commercial volume calculation.
         """
+        # Cache organization-wide sales sums to prevent db overload
+        if not customer_id:
+            cache_key = (start_date, end_date)
+            now_ts = time.time()
+            if cache_key in _org_sales_cache:
+                val, expiry = _org_sales_cache[cache_key]
+                if now_ts < expiry:
+                    return val
+
         stmt = select(func.sum(EventLedger.amount)).where(
             EventLedger.event_type == "SALE",
             EventLedger.event_date >= start_date,
             EventLedger.event_date <= end_date,
             EventLedger.event_date <= func.current_date(),
             not_(EventLedger.is_voided),
-            # EventLedger.is_ok == 0,  <-- REMOVED: Commercial reality uses all sales
         )
 
         if customer_id:
             stmt = stmt.where(EventLedger.customer_id == customer_id)
 
         res = await self.db.execute(stmt)
-        return float(res.scalar() or 0.0)
+        val = float(res.scalar() or 0.0)
+
+        if not customer_id:
+            _org_sales_cache[cache_key] = (val, now_ts + 300)  # Cache for 5 minutes
+
+        return val
 
     async def get_bulk_total_sales_in_window(
         self, start_date: datetime, end_date: datetime, customer_ids: list[str]
@@ -193,57 +221,57 @@ class IntelligenceRepository:
         """
         Calculates organization-wide distribution metrics (P95) for normalization.
         Returns P95 billing volume and P95 participation density.
+        Uses native PostgreSQL percentile calculations to prevent Python/Polars memory bloat.
         """
-        # 1. Fetch sales volume per customer
-        sales_stmt = (
-            select(
-                EventLedger.customer_id, 
-                func.sum(EventLedger.amount).label("total_sales")
-            )
-            .where(
-                EventLedger.event_type == "SALE",
-                EventLedger.event_date >= start_date,
-                EventLedger.event_date <= end_date,
-                not_(EventLedger.is_voided),
-            )
-            .group_by(EventLedger.customer_id)
-        )
-        sales_res = await self.db.execute(sales_stmt)
-        sales_data = [row[1] for row in sales_res.fetchall()]
+        cache_key = (start_date, end_date)
+        now_ts = time.time()
+        if cache_key in _org_metrics_cache:
+            val, expiry = _org_metrics_cache[cache_key]
+            if now_ts < expiry:
+                return val
 
-        # 2. Fetch participation density per customer
-        # We need distinct dates of SALES per customer in the window
-        density_stmt = (
-            select(
-                EventLedger.customer_id,
-                func.count(func.distinct(EventLedger.event_date)).label("active_days"),
+        # Calculate using PostgreSQL percentile_cont aggregate functions
+        # This completely avoids pulling active customer lists into Python
+        stmt = text("""
+            WITH customer_stats AS (
+                SELECT 
+                    customer_id, 
+                    SUM(amount) as total_sales,
+                    COUNT(DISTINCT event_date) as active_days
+                FROM event_ledger
+                WHERE event_type = 'SALE' 
+                  AND event_date >= :start_date 
+                  AND event_date <= :end_date 
+                  AND NOT is_voided
+                GROUP BY customer_id
             )
-            .where(
-                EventLedger.event_type == "SALE",
-                EventLedger.event_date >= start_date,
-                EventLedger.event_date <= end_date,
-                not_(EventLedger.is_voided),
-            )
-            .group_by(EventLedger.customer_id)
-        )
-        density_res = await self.db.execute(density_stmt)
-        
+            SELECT 
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY total_sales) as p95_billing,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY active_days) as p95_active_days,
+                AVG(total_sales) as avg_org_billing
+            FROM customer_stats;
+        """)
+
+        res = await self.db.execute(stmt, {"start_date": start_date, "end_date": end_date})
+        row = res.fetchone()
+
+        p95_billing = float(row[0]) if row and row[0] is not None else 100000.0
+        p95_active_days = float(row[1]) if row and row[1] is not None else 0.4 * (end_date - start_date).days
+        avg_org_billing = float(row[2]) if row and row[2] is not None else 10000.0
+
         window_days = (end_date - start_date).days or 1
-        densities = [row[1] / window_days for row in density_res.fetchall()]
+        p95_density = p95_active_days / window_days
 
-        if not sales_data or not densities:
-            return {"p95_billing": 100000.0, "p95_density": 0.4, "avg_org_billing": 10000.0}
-
-        import polars as pl
-        
-        sales_q = pl.Series("sales", sales_data)
-        density_q = pl.Series("density", densities)
-
-        return {
-            "p95_billing": float(sales_q.quantile(0.95) or 100000.0),
-            "p95_density": float(density_q.quantile(0.95) or 0.4),
-            "avg_org_billing": float(sales_q.mean() or 10000.0),
+        metrics = {
+            "p95_billing": p95_billing,
+            "p95_density": p95_density,
+            "avg_org_billing": avg_org_billing,
         }
+
+        # Cache organization-wide metrics for 5 minutes
+        _org_metrics_cache[cache_key] = (metrics, now_ts + 300)
+
+        return metrics
 
     async def get_bulk_avg_monthly_billing(
         self, start_date: datetime, end_date: datetime, customer_ids: list[str]

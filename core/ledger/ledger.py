@@ -61,15 +61,15 @@ class LedgerService:
         # Apply sequencing within the dataframe
         new_events_df = new_events_df.sort(["customer_id", "event_date"])
 
-        # Helper to apply customer sequence offset
-        def assign_customer_seq(df_group: pl.DataFrame) -> pl.DataFrame:
-            cid = df_group["customer_id"][0]
-            offset = (history_seqs.get(cid) or -1) + 1
-            return df_group.with_columns(
-                (pl.lit(offset) + pl.int_range(0, df_group.height)).alias("customer_sequence_number")
-            )
+        # Vectorized calculation of customer sequence offsets
+        offsets = {cid: (max_seq if max_seq is not None else -1) + 1 for cid, max_seq in history_seqs.items()}
 
-        new_events_df = new_events_df.group_by("customer_id", maintain_order=True).map_groups(assign_customer_seq)
+        new_events_df = new_events_df.with_columns(
+            (
+                pl.col("customer_id").replace(offsets, default=0).cast(pl.Int64)
+                + pl.int_range(0, pl.len()).over("customer_id").cast(pl.Int64)
+            ).alias("customer_sequence_number")
+        )
 
         # 5. Apply RG Semantics
         batch_events = self._apply_rg_semantics(new_events_df)
@@ -116,6 +116,31 @@ class LedgerService:
         df_to_insert = df.select(valid_cols)
 
         records = df_to_insert.to_dicts()
+        
+        # Ensure metadata is JSON-serializable (converts Decimal, UUID, date/datetime)
+        if records:
+            import decimal
+            import uuid
+            from datetime import date, datetime
+            from typing import Any
+
+            def serialize_val(v: Any) -> Any:
+                if isinstance(v, dict):
+                    return {key: serialize_val(val) for key, val in v.items()}
+                elif isinstance(v, list):
+                    return [serialize_val(val) for val in v]
+                elif isinstance(v, decimal.Decimal):
+                    return float(v)
+                elif isinstance(v, uuid.UUID):
+                    return str(v)
+                elif isinstance(v, (datetime, date)):
+                    return v.isoformat()
+                return v
+
+            for r in records:
+                if "metadata" in r and isinstance(r["metadata"], dict):
+                    r["metadata"] = serialize_val(r["metadata"])
+
         logger.debug(f"Attempting to bulk upsert {len(records)} records into event_ledger")
         
         # Check for null event_ids which would cause insertion failures

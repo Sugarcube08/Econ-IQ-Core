@@ -1,7 +1,9 @@
-import polars as pl
 from datetime import date
+
+import polars as pl
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.feature_store.engineer import FeatureEngineer
 from core.ledger.context import LedgerContextService
 from core.schemas.intelligence import AnalysisContext

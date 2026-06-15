@@ -520,12 +520,12 @@ class DashboardRepository:
         Queries ONLY customer_intelligence serving layer.
         """
         # SQL-side Risk Severity Score (1 - trust_score)
-        risk_score = (1.0 - func.coalesce(CustomerIntelligence.trust_score, 0.0)).label("risk_score")
+        risk_severity = (1.0 - func.coalesce(CustomerIntelligence.trust_score, 0.0)).label("risk_severity")
 
         query = select(
             CustomerIntelligence,
-            risk_score
-        ).order_by(desc("risk_score")).limit(limit)
+            risk_severity
+        ).order_by(desc("risk_severity")).limit(limit)
         
         res = await self.db.execute(query)
 

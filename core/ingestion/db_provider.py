@@ -14,7 +14,7 @@ class DBIngestionProvider:
 
     async def _get_table(self, table_name: str) -> Table | None:
         """Reflects an external table only if it exists, using a global cache."""
-        from core.storage.postgres import get_reflected_table, _missing_tables
+        from core.storage.postgres import _missing_tables, get_reflected_table
         
         is_already_missing = table_name in _missing_tables
         table = await get_reflected_table(table_name, self.session)
@@ -87,7 +87,7 @@ class DBIngestionProvider:
         if not all_normalized:
             return pl.DataFrame(), processed_ids, metadata_customer_ids
 
-        return pl.concat(all_normalized, how="vertical"), processed_ids, metadata_customer_ids
+        return pl.concat(all_normalized, how="diagonal_relaxed"), processed_ids, metadata_customer_ids
     def _parse_date_column(self, df: pl.DataFrame, col_name: str) -> pl.Expr:
         if col_name not in df.columns:
             return pl.lit(None).cast(pl.Date)

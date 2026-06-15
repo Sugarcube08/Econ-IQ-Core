@@ -119,6 +119,15 @@ class IntelligenceOrchestrator:
             if not dim_df.is_empty():
                 dimensions_df = dimensions_df.join(dim_df, on=["customer_id", "date"], how="left")
 
+        # Ensure all 8 dimensions exist in dimensions_df to prevent Downstream ColumnNotFound errors
+        for col in [
+            "dim_activity", "dim_discipline", "dim_credit", 
+            "dim_relationship", "dim_product", "dim_friction", 
+            "dim_growth", "dim_stability"
+        ]:
+            if col not in dimensions_df.columns:
+                dimensions_df = dimensions_df.with_columns(pl.lit(0.0).alias(col))
+
         # 4. Meta Scores
         meta_scores_df = self.meta_scores.compute(dimensions_df)
 
@@ -294,8 +303,8 @@ class IntelligenceOrchestrator:
             # MANDATORY: Analysis is always anchored to real CURRENT_DATE.
             # Future-dated events are ignored by ledger_context and IntelligenceRepository.
             now = datetime.now(UTC)
-            effective_today = now.date()
-            current_end = datetime.combine(effective_today, now.time(), tzinfo=UTC)
+            # Normalize to the hour to allow TTL caching of organization-wide metrics across chunk runs
+            current_end = now.replace(minute=0, second=0, microsecond=0)
 
             current_start = current_end - timedelta(days=365)
             prev_end = current_start - timedelta(microseconds=1)
@@ -397,7 +406,7 @@ class IntelligenceOrchestrator:
                         # Current Window Analysis (last 365d)
                         current_ctx = AnalysisContext(window_days=365, end_date=current_end.date())
                         curr_states, curr_conf = self.compute_intelligence(cust_df, current_ctx, org_metrics=curr_org_metrics, customer_avg_billing=curr_avg_billing)
-                        curr_row = curr_states.sort("date").tail(1).to_dicts()[0] if not curr_states.is_empty() else {}
+                        curr_row = curr_states.sort("date").row(-1, named=True) if not curr_states.is_empty() else {}
 
                         # Extract absolute outstanding at current_end
                         curr_outstanding = curr_row.get("outstanding_balance", 0.0) if curr_row else 0.0
@@ -405,7 +414,7 @@ class IntelligenceOrchestrator:
                         # Previous Window Analysis (730d -> 365d)
                         prev_ctx = AnalysisContext(window_days=365, end_date=prev_end.date())
                         prev_states, prev_conf = self.compute_intelligence(cust_df, prev_ctx, org_metrics=prev_org_metrics, customer_avg_billing=prev_avg_billing)
-                        prev_row = prev_states.sort("date").tail(1).to_dicts()[0] if not prev_states.is_empty() else {}
+                        prev_row = prev_states.sort("date").row(-1, named=True) if not prev_states.is_empty() else {}
 
                         # Extract absolute outstanding at prev_end
                         prev_outstanding = prev_row.get("outstanding_balance", 0.0) if prev_row else 0.0

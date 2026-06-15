@@ -45,14 +45,27 @@ class LedgerContextService:
             opening_balances = {}
 
         # 2. Fetch history from EventLedger, excluding any stale OPENING_BALANCE events
-        stmt = select(EventLedger).where(
+        # OPTIMIZATION: Query specific columns directly to avoid SQLAlchemy ORM memory bloat and session identity map caching.
+        stmt = select(
+            EventLedger.event_id,
+            EventLedger.customer_id,
+            EventLedger.event_type,
+            EventLedger.event_date,
+            EventLedger.amount,
+            EventLedger.is_ok,
+            EventLedger.source_raw_id,
+            EventLedger.source_table,
+            EventLedger.customer_sequence_number,
+            EventLedger.event_hash,
+            EventLedger.metadata_,
+        ).where(
             EventLedger.customer_id.in_(customer_ids), 
             not_(EventLedger.is_voided),
             EventLedger.event_type != "OPENING_BALANCE",
             EventLedger.event_date <= func.current_date()
         )
         result = await session.execute(stmt)
-        rows = result.scalars().all()
+        rows = result.all()
 
         # Convert to dicts, taking care of metadata_
         dicts = []

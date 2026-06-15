@@ -409,8 +409,8 @@ class ResilientIntelligenceOrchestrator:
         start_time: float
     ) -> ResilientExecutionResult:
         """Constructs response payload from healthy dataframes."""
-        curr_row = curr_df.to_dicts()[0]
-        prev_row = prev_df.to_dicts()[0] if not prev_df.is_empty() else {}
+        curr_row = curr_df.row(0, named=True)
+        prev_row = prev_df.row(0, named=True) if not prev_df.is_empty() else {}
 
         scores_dict = {
             "health_score": curr_row.get("health_score") or 0.0,
@@ -481,7 +481,7 @@ class ResilientIntelligenceOrchestrator:
         forensics: dict[str, Any]
     ) -> ResilientExecutionResult:
         """Constructs response payload when previous comparison window delta calculations fail."""
-        curr_row = curr_df.to_dicts()[0]
+        curr_row = curr_df.row(0, named=True)
         
         scores_dict = {
             "health_score": curr_row.get("health_score") or 0.0,

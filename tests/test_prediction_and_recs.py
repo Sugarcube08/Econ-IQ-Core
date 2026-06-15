@@ -1,17 +1,11 @@
-import pytest
 import polars as pl
+
 from core.prediction.registry import model_registry
 from core.prediction.service import (
-    DefaultRiskEstimator,
     DefaultGrowthEstimator,
-    DefaultHealthEstimator,
-    DefaultChurnEstimator,
-    DefaultCollectionEstimator,
-    DefaultOpportunityEstimator,
+    DefaultRiskEstimator,
 )
-from core.recommendation.service import RecommendationService
-from core.schemas.prediction import RiskPrediction, GrowthPrediction
-from core.schemas.recommendation import RecommendationType
+from core.schemas.prediction import GrowthPrediction, RiskPrediction
 
 
 def test_model_registry_lifecycle():

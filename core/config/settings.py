@@ -2,14 +2,18 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Get the project root directory (econiq/backend)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Manually load .env
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
+
+# Force POLARS_MAX_THREADS to 1 by default, or to whatever is in the env/settings
+os.environ["POLARS_MAX_THREADS"] = os.getenv("POLARS_MAX_THREADS", "1")
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -66,11 +70,17 @@ class Settings(BaseSettings):
     # Feature Toggles
     EMAIL_SERVICE: bool = Field(True, validation_alias="EMAIL_SERVICE")
     ENABLE_BACKGROUND_WORKERS: bool = Field(True, validation_alias="ENABLE_BACKGROUND_WORKERS")
+    STARTUP_MODE: str = Field("full", validation_alias="STARTUP_MODE")
     SKIP_SCHEMA_VERIFICATION: bool = Field(False, validation_alias="SKIP_SCHEMA_VERIFICATION")
 
     # Worker Tuning
     INTELLIGENCE_POLL_INTERVAL: int = Field(15, validation_alias="INTELLIGENCE_POLL_INTERVAL")
     SYNC_POLL_INTERVAL: int = Field(30, validation_alias="SYNC_POLL_INTERVAL")
+    PROCESSING_MODE: str = Field("sequential", validation_alias="PROCESSING_MODE")
+    POLARS_MAX_THREADS: int = Field(1, validation_alias="POLARS_MAX_THREADS")
+    SYNC_BATCH_SIZE: int = Field(500, validation_alias="SYNC_BATCH_SIZE")
+    INTELLIGENCE_CHUNK_SIZE: int = Field(10, validation_alias="INTELLIGENCE_CHUNK_SIZE")
+    RECOMPUTE_BATCH_SIZE: int = Field(10, validation_alias="RECOMPUTE_BATCH_SIZE")
 
     # Security Policies
     OTP_PEPPER: str | None = Field(None, validation_alias="OTP_PEPPER")

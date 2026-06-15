@@ -22,6 +22,9 @@ services:
     network_mode: host
     env_file:
       - .env
+    environment:
+      - MALLOC_ARENA_MAX=2
+      - POLARS_MAX_THREADS=2
     depends_on:
       redis:
         condition: service_healthy

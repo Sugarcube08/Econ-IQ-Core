@@ -54,13 +54,19 @@ class SettlementMatchingEngine:
             bills = []
             matched_data = []
 
-            for row in group.to_dicts():
-                etype = row["event_type"]
-                amt = row["amount"]
-                edate = row["date"]
+            event_types = group["event_type"].to_list()
+            amounts = group["amount"].to_list()
+            dates = group["date"].to_list()
+            event_uids = group["event_uid"].to_list()
+
+            for i in range(len(event_types)):
+                etype = event_types[i]
+                amt = amounts[i]
+                edate = dates[i]
+                euid = event_uids[i]
 
                 if etype in ["SALE", "OPENING_BALANCE"]:
-                    bills.append(Bill(id=row["event_uid"], date=edate, amount=amt, remaining=amt))
+                    bills.append(Bill(id=euid, date=edate, amount=amt, remaining=amt))
                 else:
                     # PAYMENT, RETURN, or DISCOUNT
                     # Apply credit to bills in FIFO order

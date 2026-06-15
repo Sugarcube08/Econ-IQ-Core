@@ -1,5 +1,6 @@
-import polars as pl
 from datetime import date, timedelta
+
+import polars as pl
 from loguru import logger
 
 

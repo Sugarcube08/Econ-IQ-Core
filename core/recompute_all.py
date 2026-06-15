@@ -77,7 +77,8 @@ async def recompute_all():
             return
 
         # Process in chunks to ensure system stability and avoid long-running transaction issues
-        chunk_size = 10
+        from core.config.settings import settings
+        chunk_size = settings.RECOMPUTE_BATCH_SIZE
         total_chunks = (len(customer_ids) + chunk_size - 1) // chunk_size
         
         for i in range(0, len(customer_ids), chunk_size):

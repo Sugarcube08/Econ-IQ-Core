@@ -72,6 +72,19 @@ To launch the FastAPI development server with reloading:
 uv run uvicorn core.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+### Creating a Superuser
+To create a new superuser or promote an existing user to superuser (`SUPER_ADMIN`), run the management script:
+```bash
+# Interactive mode (prompts for missing inputs and password securely)
+uv run python core/create_superuser.py
+
+# Non-interactive mode (supply details via flags)
+uv run python core/create_superuser.py --email admin@example.com --name "System Admin" --password "securepassword"
+
+# Promote an existing user to SUPER_ADMIN (updates password as well)
+uv run python core/create_superuser.py --email user@example.com --promote
+```
+
 ### Running Tests
 Execute the pytest suite:
 ```bash

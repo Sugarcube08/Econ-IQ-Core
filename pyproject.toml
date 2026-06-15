@@ -8,6 +8,7 @@ dependencies = [
     "aiosmtplib>=3.0.1",
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
+    "bcrypt==4.0.1",
     "cryptography>=48.0.0",
     "duckdb>=1.5.2",
     "email-validator>=2.3.0",
