@@ -41,29 +41,11 @@ class RedisManager:
             await self._client.ping()
             self._is_healthy = True
             logger.info("Successfully connected to Redis.")
-            
-            # Start background health probe
-            asyncio.create_task(self._health_probe_loop())
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             self._is_healthy = False
             # In strict mode, we might want to exit here, but we'll let the circuit breaker handle it
             raise
-
-    async def _health_probe_loop(self):
-        """Background loop to monitor Redis health."""
-        while True:
-            try:
-                if self._client:
-                    await self._client.ping()
-                    if not self._is_healthy:
-                        logger.info("Redis health restored.")
-                    self._is_healthy = True
-            except Exception as e:
-                if self._is_healthy:
-                    logger.warning(f"Redis health check failed: {e}. Entering degraded mode.")
-                self._is_healthy = False
-            await asyncio.sleep(10)
 
     def is_operational(self) -> bool:
         """Returns True if Redis is healthy and available."""

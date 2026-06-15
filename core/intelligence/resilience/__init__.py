@@ -24,27 +24,24 @@ from core.schemas.customers import (
 INTELLIGENCE_FAILURES = Counter(
     "intelligence_failures_total", 
     "Total unexpected intelligence computation exceptions", 
-    ["customer_id", "error_type"]
+    ["error_type"]
 )
 VALIDATOR_STARVATION = Counter(
     "validator_starvation_total", 
-    "Total validation reports indicating historical context starvation", 
-    ["customer_id"]
+    "Total validation reports indicating historical context starvation"
 )
 FALLBACK_RESPONSES = Counter(
     "fallback_responses_total", 
     "Total fallback/degraded responses served to frontend", 
-    ["customer_id", "fallback_mode"]
+    ["fallback_mode"]
 )
 DEGRADED_REQUESTS = Counter(
     "degraded_customer_requests_total", 
-    "Total degraded customer profile requests", 
-    ["customer_id"]
+    "Total degraded customer profile requests"
 )
 STALE_CONNECTION_SUSPICIONS = Counter(
     "stale_connection_suspicions_total", 
-    "Total counts of suspected connection pool or FDW stale states", 
-    ["customer_id"]
+    "Total counts of suspected connection pool or FDW stale states"
 )
 
 
@@ -163,13 +160,13 @@ class ResilientIntelligenceOrchestrator:
 
             if not report.is_valid:
                 # Suspect stale connection/pool if graph has data but validator reports starvation
-                VALIDATOR_STARVATION.labels(customer_id=customer_id).inc()
+                VALIDATOR_STARVATION.inc()
                 forensics = await self.capture_forensics(customer_id, None, curr_df, stage="current_validation_failed")
                 
                 # Check for suspicion of stale pool / FDW connection
                 # (If total_records > 0 but rolling windows are starved)
                 if report.status == DataHealthStatus.NO_ACTIVITY and curr_df.height > 0:
-                    STALE_CONNECTION_SUSPICIONS.labels(customer_id=customer_id).inc()
+                    STALE_CONNECTION_SUSPICIONS.inc()
                 
                 # Degrade to snapshot/cache fallback
                 return await self._degrade_to_snapshot_or_cache(
@@ -186,7 +183,7 @@ class ResilientIntelligenceOrchestrator:
                 if not prev_report.is_valid:
                     # Previous window starved, degrade previous to snapshot/zeros while keeping current full
                     forensics = await self.capture_forensics(customer_id, None, prev_df, stage="previous_validation_failed")
-                    VALIDATOR_STARVATION.labels(customer_id=customer_id).inc()
+                    VALIDATOR_STARVATION.inc()
                     
                     return self._build_partial_response(
                         customer_id, customer_basic, curr_df, prev_df, curr_ctx, prev_ctx, start_time, forensics
@@ -199,7 +196,7 @@ class ResilientIntelligenceOrchestrator:
 
             except Exception as prev_err:
                 # Previous window crashed, log and degrade previous
-                INTELLIGENCE_FAILURES.labels(customer_id=customer_id, error_type=prev_err.__class__.__name__).inc()
+                INTELLIGENCE_FAILURES.labels(error_type=prev_err.__class__.__name__).inc()
                 forensics = await self.capture_forensics(customer_id, prev_err, stage="previous_calculation_exception")
                 return self._build_partial_response(
                     customer_id, customer_basic, curr_df, pl.DataFrame(), curr_ctx, prev_ctx, start_time, forensics
@@ -207,8 +204,8 @@ class ResilientIntelligenceOrchestrator:
 
         except Exception as curr_err:
             # Current window crashed completely (e.g. database error, syntax, arrow crash)
-            INTELLIGENCE_FAILURES.labels(customer_id=customer_id, error_type=curr_err.__class__.__name__).inc()
-            DEGRADED_REQUESTS.labels(customer_id=customer_id).inc()
+            INTELLIGENCE_FAILURES.labels(error_type=curr_err.__class__.__name__).inc()
+            DEGRADED_REQUESTS.inc()
             forensics = await self.capture_forensics(customer_id, curr_err, stage="current_calculation_exception")
             
             return await self._degrade_to_cache_or_minimal(
@@ -231,7 +228,7 @@ class ResilientIntelligenceOrchestrator:
         try:
             cached_intel = await self.repo.get_latest_customer_state(customer_id)
             if cached_intel:
-                FALLBACK_RESPONSES.labels(customer_id=customer_id, fallback_mode="CACHE").inc()
+                FALLBACK_RESPONSES.labels(fallback_mode="CACHE").inc()
                 data = self._build_payload_from_cache(customer_basic, cached_intel)
                 
                 return ResilientExecutionResult(
@@ -245,7 +242,7 @@ class ResilientIntelligenceOrchestrator:
             logger.error(f"Failed to load cache fallback for customer {customer_id}: {e}")
 
         # Fallback to SNAPSHOT Mode (no cache, but we can return basic customer profile details)
-        FALLBACK_RESPONSES.labels(customer_id=customer_id, fallback_mode="SNAPSHOT").inc()
+        FALLBACK_RESPONSES.labels(fallback_mode="SNAPSHOT").inc()
         data = self._build_minimal_payload(customer_id, customer_basic, mode="SNAPSHOT")
         
         return ResilientExecutionResult(
@@ -269,7 +266,7 @@ class ResilientIntelligenceOrchestrator:
         try:
             cached_intel = await self.repo.get_latest_customer_state(customer_id)
             if cached_intel:
-                FALLBACK_RESPONSES.labels(customer_id=customer_id, fallback_mode="CACHE_AFTER_EXCEPTION").inc()
+                FALLBACK_RESPONSES.labels(fallback_mode="CACHE_AFTER_EXCEPTION").inc()
                 data = self._build_payload_from_cache(customer_basic, cached_intel)
                 
                 return ResilientExecutionResult(
@@ -283,7 +280,7 @@ class ResilientIntelligenceOrchestrator:
             logger.error(f"Failed to load cache fallback after exception for customer {customer_id}: {e}")
 
         # Minimal Fallback (Goal 4 & Goal 6)
-        FALLBACK_RESPONSES.labels(customer_id=customer_id, fallback_mode="MINIMAL_FALLBACK").inc()
+        FALLBACK_RESPONSES.labels(fallback_mode="MINIMAL_FALLBACK").inc()
         data = self._build_minimal_payload(customer_id, customer_basic, mode="DEGRADED")
         
         return ResilientExecutionResult(

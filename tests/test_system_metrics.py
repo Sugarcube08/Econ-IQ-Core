@@ -71,6 +71,6 @@ def test_system_runtime_endpoint():
         assert runtime["queue_depth"] >= 0
         assert runtime["sync_backlog"] >= 0
         assert runtime["active_workers"] >= 0
-        assert runtime["processing_mode"] in ("sequential", "balanced", "parallel")
+        assert runtime["processing_mode"] in ("sequential", "balanced", "parallel", "simple")
         assert runtime["active_worker"] in ("none", "sync_worker", "intel_worker", "sequential_worker")
         assert runtime["current_stage"] in ("idle", "sync_ingestion", "ledger_materialization", "queue_population", "customer_recomputation", "sleeping")

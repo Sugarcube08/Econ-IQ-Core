@@ -13,13 +13,10 @@ from core.ingestion.db_provider import DBIngestionProvider
 from core.ledger.ledger import LedgerService
 from core.models.state_models import (
     BatchStatus,
-    CustomerRecomputationQueue,
-    RecomputationStatus,
     SyncBatch,
 )
 from core.storage.postgres import AsyncSessionLocal
 from core.config.settings import settings
-from core.observability.runtime_state import runtime_state
 
 
 class SyncPipeline:
@@ -62,22 +59,6 @@ class SyncPipeline:
         Executes a single, isolated, transaction-safe synchronization cycle.
         Returns True if records were processed, False otherwise.
         """
-        lock_context = runtime_state.lock if settings.PROCESSING_MODE == "sequential" else asyncio.Lock()
-        async with lock_context:
-            if settings.PROCESSING_MODE == "sequential":
-                runtime_state.active_worker = "sequential_worker"
-            else:
-                runtime_state.active_worker = "sync_worker"
-            runtime_state.current_stage = "sync_ingestion"
-            try:
-                return await self._run_cycle_internal()
-            finally:
-                runtime_state.current_stage = "idle"
-
-    async def _run_cycle_internal(self) -> bool:
-        """
-        Internal implementation of the synchronization cycle.
-        """
         async with AsyncSessionLocal() as session:
             # 1. Acquire Session-level Advisory Lock (Key: 42069)
             # Session-level lock is used to control concurrency across multiple transaction boundaries.
@@ -103,20 +84,7 @@ class SyncPipeline:
             batch_id = str(uuid.uuid4())
             start_time = datetime.now(UTC)
 
-            # 2. Queue Pressure Protection: Stop sync ingestion if intelligence queue is overloaded
-            try:
-                q_count_res = await session.execute(
-                    text("SELECT COUNT(*) FROM customer_recomputation_queue WHERE status = 'PENDING'")
-                )
-                pending_queue_count = q_count_res.scalar() or 0
-                if pending_queue_count > 10000:
-                    logger.warning(
-                        f"Queue Pressure Protection Active: {pending_queue_count} pending recomputation tasks "
-                        f"exceeds the limit of 10,000. Skipping sync ingestion cycle."
-                    )
-                    return False
-            except Exception as q_err:
-                logger.error(f"Failed to check recomputation queue count: {q_err}")
+            # Queue Pressure Protection removed under simple architecture
 
             # 3. Query backlog scale to determine limits and sleep multiplier dynamically
             try:
@@ -125,27 +93,14 @@ class SyncPipeline:
                 logger.error(f"Failed to query backlog count: {b_err}")
                 backlog = 0
 
-            # Determine limits and loop sleeping multiplier based on backlog size
-            if settings.PROCESSING_MODE == "sequential":
-                limits = {
-                    "raw_sales": settings.SYNC_BATCH_SIZE,
-                    "raw_payments": settings.SYNC_BATCH_SIZE,
-                    "raw_returns": settings.SYNC_BATCH_SIZE
-                }
-                self.current_poll_multiplier = 1.0
-                logger.info(f"Sync Pipeline (Sequential): Backlog size optimal. Processing up to {settings.SYNC_BATCH_SIZE} rows.")
-            elif backlog < 10000:
-                limits = {"raw_sales": 5000, "raw_payments": 3000, "raw_returns": 2000}
-                self.current_poll_multiplier = 1.0
-                logger.info(f"Sync Pipeline: Backlog size optimal ({backlog} rows). Processing up to 10k rows.")
-            elif backlog < 100000:
-                limits = {"raw_sales": 2000, "raw_payments": 1000, "raw_returns": 500}
-                self.current_poll_multiplier = 2.0
-                logger.warning(f"Sync Pipeline: Moderate backlog ({backlog} rows) detected. Entering SLOW MODE (throttled limits, double sleep).")
-            else:
-                limits = {"raw_sales": 1000, "raw_payments": 500, "raw_returns": 200}
-                self.current_poll_multiplier = 4.0
-                logger.warning(f"Sync Pipeline: Massive backlog ({backlog} rows) detected. Entering RECOVERY MODE (minimal limits, quadruple sleep).")
+            # Determine limits based on config settings
+            limits = {
+                "raw_sales": settings.SYNC_BATCH_SIZE,
+                "raw_payments": settings.SYNC_BATCH_SIZE,
+                "raw_returns": settings.SYNC_BATCH_SIZE
+            }
+            self.current_poll_multiplier = 1.0
+            logger.info(f"Sync Pipeline: Processing up to {settings.SYNC_BATCH_SIZE} rows per table.")
             
             # State tracking for error handling
             claimed_ids = {}
@@ -273,7 +228,7 @@ class SyncPipeline:
                                     )
                                     & (table.c.processing_attempts < 3)
                                 )
-                                .limit(settings.SYNC_BATCH_SIZE if settings.PROCESSING_MODE == "sequential" else 1000)
+                                .limit(settings.SYNC_BATCH_SIZE)
                                 .with_for_update(skip_locked=True)
                             )
                             res = await session.execute(stmt)
@@ -318,38 +273,15 @@ class SyncPipeline:
                         # 5. Materialize ledger events (if we have sales/payments/returns)
                         unique_customers_set = set()
                         if all_normalized:
-                            runtime_state.current_stage = "ledger_materialization"
                             combined_df = pl.concat(all_normalized, how="diagonal_relaxed")
                             await self.ledger_service.process_and_materialize(session, [combined_df], batch_id)
 
                             # Extract unique customers affected
                             unique_customers_set.update(combined_df["customer_id"].unique().to_list())
                             
-                        # Add customers from metadata (raw_customers) to ensure they are also queued
+                        # Add customers from metadata (raw_customers) to ensure they are tracked
                         unique_customers_set.update(metadata_customers)
                         unique_customers = list(unique_customers_set)
-                        
-                        if unique_customers:
-                            logger.debug(f"Batch {batch_id} affected {len(unique_customers)} unique customers (including metadata)")
-
-                            # 6. Insert deduplicated recomputation tasks into the queue
-                            runtime_state.current_stage = "queue_population"
-                            queue_records = [
-                                {
-                                    "customer_id": cid,
-                                    "batch_id": batch_id,
-                                    "status": RecomputationStatus.PENDING,
-                                    "priority": 0,
-                                    "reason": f"Ingestion delta synchronization in batch {batch_id}",
-                                }
-                                for cid in unique_customers
-                            ]
-                            batch_size = 1000
-                            for j in range(0, len(queue_records), batch_size):
-                                chunk = queue_records[j : j + batch_size]
-                                await session.execute(insert(CustomerRecomputationQueue).values(chunk))
-
-                            logger.debug(f"Queued {len(unique_customers)} customers for intelligence recomputation")
 
                         # 7. Mark claimed rows as processed successfully
                         for table_name, ids in claimed_ids.items():
@@ -488,44 +420,3 @@ class SyncPipeline:
                         res = await session.execute(stmt)
                         total += res.scalar() or 0
                 return total
-
-    async def run_loop(self, poll_interval: int = 15):
-        """Continuous polling loop for dedicated Sync Service deployment."""
-        logger.info(f"Sync Ingestion Service Loop started (interval: {poll_interval}s, worker_id: {self.worker_id})")
-        
-        last_idle_log = datetime.now(UTC) - timedelta(minutes=30)
-        
-        while True:
-            try:
-                # 1. Ultra-cheap existence check before any orchestration
-                if not await self.has_pending_work():
-                    # Dormant logging: only log idle status every 30 minutes
-                    if datetime.now(UTC) - last_idle_log > timedelta(minutes=30):
-                        logger.info(f"Sync service idle — no pending rows detected for 30 minutes (worker: {self.worker_id})")
-                        last_idle_log = datetime.now(UTC)
-                    
-                    await asyncio.sleep(poll_interval)
-                    continue
-
-                # Reset idle log timer when work is found
-                last_idle_log = datetime.now(UTC) - timedelta(minutes=30)
-
-                # 2. Monitor stale unprocessed rows (DEBUG level)
-                stale_count = await self.get_stale_unprocessed_count()
-                if stale_count > 0:
-                    logger.debug(f"Observability check: {stale_count} stale unprocessed rows waiting in raw tables.")
-
-                processed = await self.run_cycle()
-
-                # If we processed records, check immediately again but yield with a tiny sleep to prevent CPU/memory hoarding
-                if processed:
-                    import gc
-                    gc.collect()
-                    await asyncio.sleep(0.2 * self.current_poll_multiplier)
-                    continue
-            except Exception as e:
-                logger.error(f"Unexpected error in background sync loop: {e}")
-            
-            import gc
-            gc.collect()
-            await asyncio.sleep(poll_interval * self.current_poll_multiplier)

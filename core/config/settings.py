@@ -76,7 +76,6 @@ class Settings(BaseSettings):
     # Worker Tuning
     INTELLIGENCE_POLL_INTERVAL: int = Field(15, validation_alias="INTELLIGENCE_POLL_INTERVAL")
     SYNC_POLL_INTERVAL: int = Field(30, validation_alias="SYNC_POLL_INTERVAL")
-    PROCESSING_MODE: str = Field("sequential", validation_alias="PROCESSING_MODE")
     POLARS_MAX_THREADS: int = Field(1, validation_alias="POLARS_MAX_THREADS")
     SYNC_BATCH_SIZE: int = Field(500, validation_alias="SYNC_BATCH_SIZE")
     INTELLIGENCE_CHUNK_SIZE: int = Field(10, validation_alias="INTELLIGENCE_CHUNK_SIZE")
