@@ -484,6 +484,19 @@ class IntelligenceOrchestrator:
 
                         await repo.persist_intelligence(intel_data)
 
+                        # Trigger persistent alerts & recommendations generation
+                        try:
+                            from core.services.alert_service import AlertService
+                            await AlertService().scan_and_generate_alerts(cid, session)
+                        except Exception as e_alert:
+                            logger.error(f"Failed to generate alerts for customer {cid}: {e_alert}")
+
+                        try:
+                            from core.recommendation.service import RecommendationService
+                            await RecommendationService().generate_recommendations(session, cid)
+                        except Exception as e_rec:
+                            logger.error(f"Failed to generate recommendations for customer {cid}: {e_rec}")
+
                 except Exception as e:
                     logger.error(f"Failed to recompute intelligence for customer {cid}: {e}")
                     continue

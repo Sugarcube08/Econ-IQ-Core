@@ -1,5 +1,7 @@
 import os
 
+from sqlalchemy import MetaData, Table
+from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -32,8 +34,7 @@ class Base(DeclarativeBase):
     pass
 
 
-from sqlalchemy import MetaData, Table
-from sqlalchemy.exc import NoSuchTableError
+
 
 # Global metadata cache for reflected tables to prevent memory leaks
 reflected_metadata = MetaData()

@@ -12,8 +12,8 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=False)
 # Force POLARS_MAX_THREADS to 1 by default, or to whatever is in the env/settings
 os.environ["POLARS_MAX_THREADS"] = os.getenv("POLARS_MAX_THREADS", "1")
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field  # noqa: E402
+from pydantic_settings import BaseSettings, SettingsConfigDict  # noqa: E402
 
 
 class Settings(BaseSettings):

@@ -1,11 +1,13 @@
 import asyncio
 import gc
+
 from loguru import logger
-from sqlalchemy import select, String
+from sqlalchemy import String, select
+
 from core.config.settings import settings
 from core.intelligence.orchestrator import IntelligenceOrchestrator
-from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 from core.models.state_models import CustomerIntelligence
+from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 
 PROCESSED_CUSTOMERS_COUNT = 0
 

@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
@@ -22,12 +21,10 @@ from core.ingestion.sync_pipeline import SyncPipeline
 from core.middleware.security import HardenedSecurityMiddleware
 from core.models import auth_models, state_models  # noqa: F401
 from core.observability.logger import setup_logging
+from core.operations.routes import router as operations_router
 from core.schemas.responses import StandardResponse
 from core.storage.postgres import AsyncSessionLocal, Base, engine
 from core.storage.redis import redis_manager
-
-
-
 
 
 @asynccontextmanager
@@ -113,6 +110,7 @@ api_v1_router.include_router(api_keys_router)
 api_v1_router.include_router(customers_listing_router)
 api_v1_router.include_router(customer_detail_router)
 api_v1_router.include_router(dashboard_router)
+api_v1_router.include_router(operations_router)
 
 
 @api_v1_router.get("/health", response_model=StandardResponse[dict])
@@ -232,7 +230,7 @@ async def admin_recompute(request: Request):
         return success_response("Data synchronization and intelligence recomputation completed successfully", data={"status": "completed"}, request=request)
     except Exception as e:
         logger.error(f"Failed to execute recomputation: {e}")
-        raise FastAPIHTTPException(status_code=500, detail=f"Recomputation failed: {str(e)}")
+        raise FastAPIHTTPException(status_code=500, detail=f"Recomputation failed: {str(e)}") from e
 
 
 app.include_router(api_v1_router)

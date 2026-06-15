@@ -9,11 +9,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from loguru import logger
+from loguru import logger  # noqa: E402
 
-from core.models.auth_models import User, UserRole
-from core.repositories.auth import AuthRepository
-from core.storage.postgres import AsyncSessionLocal, Base, engine
+from core.models.auth_models import User, UserRole  # noqa: E402
+from core.repositories.auth import AuthRepository  # noqa: E402
+from core.storage.postgres import AsyncSessionLocal, Base, engine  # noqa: E402
 
 
 def validate_email(email: str) -> bool:

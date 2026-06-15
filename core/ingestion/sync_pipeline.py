@@ -1,14 +1,14 @@
-import asyncio
 import os
 import socket
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import polars as pl
 from loguru import logger
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config.settings import settings
 from core.ingestion.db_provider import DBIngestionProvider
 from core.ledger.ledger import LedgerService
 from core.models.state_models import (
@@ -16,7 +16,6 @@ from core.models.state_models import (
     SyncBatch,
 )
 from core.storage.postgres import AsyncSessionLocal
-from core.config.settings import settings
 
 
 class SyncPipeline:
@@ -88,10 +87,10 @@ class SyncPipeline:
 
             # 3. Query backlog scale to determine limits and sleep multiplier dynamically
             try:
-                backlog = await self.get_stale_unprocessed_count()
+                _backlog = await self.get_stale_unprocessed_count()
             except Exception as b_err:
                 logger.error(f"Failed to query backlog count: {b_err}")
-                backlog = 0
+                _backlog = 0
 
             # Determine limits based on config settings
             limits = {

@@ -159,7 +159,19 @@ def build_customers_query(
 
     # 3. Dynamic Filtering
     if current_state:
-        states = [s.strip().lower() for s in current_state.split(",")]
+        raw_states = [s.strip().lower() for s in current_state.split(",")]
+        states = []
+        for s in raw_states:
+            if s == "liquidity_stress":
+                states.append("declining")
+            elif s == "contract":
+                states.append("inactive")
+            elif s == "monitor":
+                states.append("irregular")
+            elif s == "healthy":
+                states.extend(["elite", "active"])
+            else:
+                states.append(s)
         if len(states) > 1:
             query = query.where(CustomerIntelligence.state.in_(states))
         else:
