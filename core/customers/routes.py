@@ -53,26 +53,11 @@ async def resolve_customer_dates(
     Helper to resolve anchor date for customer endpoints.
     MANDATORY: Analysis is always anchored to real CURRENT_DATE.
     Future-dated events are never part of the commercial window.
+    Enforces a standard 365-day canonical window.
     """
     now = datetime.now(UTC).date()
-
-    # Clip future end_date
-    if end_date and end_date > now:
-        end_date = now
-
-    if start_date and end_date:
-        s_date = start_date
-        e_date = end_date
-    elif start_date:
-        s_date = start_date
-        e_date = now
-    elif end_date:
-        s_date = (datetime.combine(end_date, datetime.min.time()) - timedelta(days=window_days)).date()
-        e_date = end_date
-    else:
-        s_date = now - timedelta(days=window_days)
-        e_date = now
-
+    s_date = now - timedelta(days=365)
+    e_date = now
     return s_date, e_date
 
 
@@ -590,6 +575,11 @@ async def get_customer_profile(
     Returns a complete longitudinal customer intelligence profile.
     Mandatory: Queries customer_intelligence exclusively for default serving.
     """
+    # Enforce standard 365-day canonical window baseline
+    window_days = 365
+    start_date = None
+    end_date = None
+
     start_time = time.time()
     repo = IntelligenceRepository(db)
     orchestrator = IntelligenceOrchestrator()

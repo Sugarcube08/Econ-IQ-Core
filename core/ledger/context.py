@@ -25,6 +25,8 @@ class LedgerContextService:
         if not customer_ids:
             return pl.DataFrame()
 
+        customer_ids = [str(cid) for cid in customer_ids]
+
         logger.debug(f"Loading historical context for {len(customer_ids)} customers from PostgreSQL")
 
         # 1. Fetch Live Opening Balances from customers

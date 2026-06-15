@@ -1,4 +1,5 @@
 import polars as pl
+import pytest
 
 from core.prediction.registry import model_registry
 from core.prediction.service import (
@@ -8,7 +9,8 @@ from core.prediction.service import (
 from core.schemas.prediction import GrowthPrediction, RiskPrediction
 
 
-def test_model_registry_lifecycle():
+@pytest.mark.asyncio
+async def test_model_registry_lifecycle():
     """Tests registration, version resolution, and swapping in registry."""
     class MockEstimator:
         def predict(self, customer_id, df):
@@ -29,7 +31,8 @@ def test_model_registry_lifecycle():
     assert isinstance(m2, MockEstimator)
 
 
-def test_risk_estimator_heuristics():
+@pytest.mark.asyncio
+async def test_risk_estimator_heuristics():
     """Verifies that DefaultRiskEstimator outputs valid contracts and limits."""
     estimator = DefaultRiskEstimator()
     
@@ -52,7 +55,8 @@ def test_risk_estimator_heuristics():
     assert pred.risk_level == "LOW"
 
 
-def test_growth_estimator_heuristics():
+@pytest.mark.asyncio
+async def test_growth_estimator_heuristics():
     """Verifies DefaultGrowthEstimator computes expansion/stable boundaries."""
     estimator = DefaultGrowthEstimator()
     

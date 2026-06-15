@@ -93,8 +93,16 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down econiq Backend...")
     if hasattr(app.state, "sync_task"):
         app.state.sync_task.cancel()
+        try:
+            await app.state.sync_task
+        except asyncio.CancelledError:
+            pass
     if hasattr(app.state, "worker_task"):
         app.state.worker_task.cancel()
+        try:
+            await app.state.worker_task
+        except asyncio.CancelledError:
+            pass
     await redis_manager.disconnect()
     await engine.dispose()
     logger.info("Shutdown complete.")
@@ -149,116 +157,6 @@ async def health_check(request: Request):
     data = {"status": "healthy", "environment": settings.APP_ENV, "version": "2.0.0"}
     return success_response("System healthy", data=data, request=request)
 
-
-@api_v1_router.get("/system/metrics", response_model=StandardResponse[dict])
-async def system_metrics(request: Request):
-    """
-    Exposes system metrics including memory, thread counts, and sync backlog count.
-    """
-    # 1. System Memory and Threads
-    rss_mb = 0.0
-    vms_mb = 0.0
-    threads = 0
-    try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    rss_mb = float(line.split()[1]) / 1024.0
-                elif line.startswith("VmSize:"):
-                    vms_mb = float(line.split()[1]) / 1024.0
-                elif line.startswith("Threads:"):
-                    threads = int(line.split()[1])
-    except Exception as e:
-        logger.warning(f"Failed to read system status from /proc: {e}")
-
-    # 2. Database statistics (Backlog)
-    sync_backlog = 0
-    try:
-        sync_pipeline = getattr(request.app.state, "sync_pipeline", None)
-        if sync_pipeline is None:
-            sync_pipeline = SyncPipeline()
-        sync_backlog = await sync_pipeline.get_stale_unprocessed_count()
-    except Exception as e:
-        logger.error(f"Failed to get sync backlog count: {e}")
-
-    data = {
-        "rss_mb": round(rss_mb, 2),
-        "vms_mb": round(vms_mb, 2),
-        "threads": threads,
-        "pending_queue": 0,
-        "sync_backlog": sync_backlog,
-        "active_workers": 0,
-        "startup_mode": settings.STARTUP_MODE,
-    }
-    return success_response("System metrics retrieved successfully", data=data, request=request)
-
-
-@api_v1_router.get("/system/runtime", response_model=StandardResponse[dict])
-async def system_runtime(request: Request):
-    """
-    Exposes runtime metrics including memory, thread counts, and sync backlog count.
-    """
-    # 1. System Memory and Threads
-    rss_mb = 0.0
-    vms_mb = 0.0
-    threads = 0
-    try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    rss_mb = float(line.split()[1]) / 1024.0
-                elif line.startswith("VmSize:"):
-                    vms_mb = float(line.split()[1]) / 1024.0
-                elif line.startswith("Threads:"):
-                    threads = int(line.split()[1])
-    except Exception as e:
-        logger.warning(f"Failed to read system status from /proc: {e}")
-
-    # 2. Database statistics (Backlog)
-    sync_backlog = 0
-    try:
-        sync_pipeline = getattr(request.app.state, "sync_pipeline", None)
-        if sync_pipeline is None:
-            sync_pipeline = SyncPipeline()
-        sync_backlog = await sync_pipeline.get_stale_unprocessed_count()
-    except Exception as e:
-        logger.error(f"Failed to get sync backlog count: {e}")
-
-    data = {
-        "rss_mb": round(rss_mb, 2),
-        "vms_mb": round(vms_mb, 2),
-        "threads": threads,
-        "queue_depth": 0,
-        "sync_backlog": sync_backlog,
-        "active_workers": 0,
-        "processing_mode": "simple",
-        "active_worker": "none",
-        "current_stage": "idle",
-    }
-    return success_response("System runtime metrics retrieved successfully", data=data, request=request)
-
-
-@api_v1_router.post("/admin/recompute", response_model=StandardResponse[dict])
-async def admin_recompute(request: Request):
-    """
-    Explicitly triggers full data synchronization followed by intelligence recomputation.
-    """
-    try:
-        from core.ingestion.sync_pipeline import SyncPipeline
-        from core.recompute_all import recompute_all
-        
-        logger.info("Admin Recompute: Triggering sync pipeline cycle...")
-        sync_pipeline = SyncPipeline()
-        await sync_pipeline.run_cycle()
-        
-        logger.info("Admin Recompute: Triggering customer recomputation...")
-        await recompute_all()
-        
-        logger.info("Admin Recompute: Data sync and recomputation completed successfully.")
-        return success_response("Data synchronization and intelligence recomputation completed successfully", data={"status": "completed"}, request=request)
-    except Exception as e:
-        logger.error(f"Failed to execute recomputation: {e}")
-        raise FastAPIHTTPException(status_code=500, detail=f"Recomputation failed: {str(e)}") from e
 
 
 app.include_router(api_v1_router)

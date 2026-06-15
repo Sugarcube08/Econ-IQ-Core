@@ -34,37 +34,14 @@ async def resolve_dates(
     Helper to resolve the current and previous period date bounds.
     MANDATORY: Analysis is always anchored to real CURRENT_DATE.
     Future-dated events are never part of the commercial window.
+    Enforces standard 365-day canonical window.
     """
     now = datetime.now(UTC).date()
-    
-    # Clip future end_date
-    if end_date and end_date > now:
-        end_date = now
-
-    if start_date and end_date:
-        s_date = start_date
-        e_date = end_date
-        duration_days = (e_date - s_date).days + 1
-        prev_e_date = s_date - timedelta(days=1)
-        prev_s_date = prev_e_date - timedelta(days=duration_days - 1)
-    elif start_date:
-        s_date = start_date
-        e_date = now
-        duration_days = (e_date - s_date).days + 1
-        prev_e_date = s_date - timedelta(days=1)
-        prev_s_date = prev_e_date - timedelta(days=duration_days - 1)
-    elif end_date:
-        e_date = end_date
-        window = window_days or 30
-        s_date = e_date - timedelta(days=window - 1)
-        prev_e_date = s_date - timedelta(days=1)
-        prev_s_date = prev_e_date - timedelta(days=window - 1)
-    else:
-        window = window_days or 30
-        e_date = now
-        s_date = e_date - timedelta(days=window - 1)
-        prev_e_date = s_date - timedelta(days=1)
-        prev_s_date = prev_e_date - timedelta(days=window - 1)
+    window = 365
+    e_date = now
+    s_date = e_date - timedelta(days=window - 1)
+    prev_e_date = s_date - timedelta(days=1)
+    prev_s_date = prev_e_date - timedelta(days=window - 1)
 
     return s_date, e_date, prev_s_date, prev_e_date
 

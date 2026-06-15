@@ -85,12 +85,8 @@ class SyncPipeline:
 
             # Queue Pressure Protection removed under simple architecture
 
-            # 3. Query backlog scale to determine limits and sleep multiplier dynamically
-            try:
-                _backlog = await self.get_stale_unprocessed_count()
-            except Exception as b_err:
-                logger.error(f"Failed to query backlog count: {b_err}")
-                _backlog = 0
+            # 3. Backlog scale check (Deprecated under simple architecture)
+            _backlog = 0
 
             # Determine limits based on config settings
             limits = {
@@ -398,24 +394,4 @@ class SyncPipeline:
                             return True
                 return False
 
-    async def get_stale_unprocessed_count(self) -> int:
-        """Returns the number of unprocessed raw rows currently waiting to be synchronized."""
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                provider = DBIngestionProvider(session)
-                total = 0
-                for table_name in ["raw_sales", "raw_payments", "raw_returns", "customers"]:
-                    table = await provider._get_table(table_name)
-                    if table is not None:
-                        change_col = table.c.updated_at if "updated_at" in table.c else table.c.created_at
-                        stmt = select(func.count(table.c.id)).where(
-                            (
-                                (table.c.is_processed.is_(False))
-                                | (table.c.processed_at.is_(None))
-                                | (change_col > table.c.processed_at)
-                            )
-                            & (table.c.processing_attempts < 3)
-                        )
-                        res = await session.execute(stmt)
-                        total += res.scalar() or 0
-                return total
+
