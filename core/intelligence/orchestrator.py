@@ -497,6 +497,12 @@ class IntelligenceOrchestrator:
                         except Exception as e_rec:
                             logger.error(f"Failed to generate recommendations for customer {cid}: {e_rec}")
 
+                        try:
+                            from core.services.collections_service import CollectionsService
+                            await CollectionsService().evaluate_commitments(cid, session)
+                        except Exception as e_comm:
+                            logger.error(f"Failed to evaluate commitments for customer {cid}: {e_comm}")
+
                 except Exception as e:
                     logger.error(f"Failed to recompute intelligence for customer {cid}: {e}")
                     continue

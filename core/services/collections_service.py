@@ -96,3 +96,36 @@ class CollectionsService:
         stmt = stmt.order_by(PaymentCommitment.promised_date.asc())
         res = await db_session.execute(stmt)
         return list(res.scalars().all())
+
+    async def evaluate_commitments(self, customer_id: str, db_session: AsyncSession):
+        """
+        Evaluates all PENDING commitments for a customer against EventLedger payments.
+        Updates status to KEPT if payment amount is satisfied, or BROKEN if promised date has passed.
+        """
+        stmt = select(PaymentCommitment).where(
+            PaymentCommitment.customer_id == customer_id,
+            PaymentCommitment.status == "PENDING"
+        )
+        res = await db_session.execute(stmt)
+        pending = res.scalars().all()
+        if not pending:
+            return
+
+        from core.models.state_models import EventLedger
+        for commitment in pending:
+            pay_stmt = select(EventLedger.amount).where(
+                EventLedger.customer_id == customer_id,
+                EventLedger.event_type == "PAYMENT",
+                EventLedger.event_date >= commitment.created_at.date(),
+                EventLedger.is_voided == False
+            )
+            pay_res = await db_session.execute(pay_stmt)
+            amounts = pay_res.scalars().all()
+            total_paid = sum(amounts)
+
+            if total_paid >= commitment.amount:
+                commitment.status = "KEPT"
+                logger.info(f"Payment commitment {commitment.id} marked KEPT. Paid {total_paid} >= promised {commitment.amount}")
+            elif date.today() > commitment.promised_date:
+                commitment.status = "BROKEN"
+                logger.info(f"Payment commitment {commitment.id} marked BROKEN. Overdue since {commitment.promised_date}")

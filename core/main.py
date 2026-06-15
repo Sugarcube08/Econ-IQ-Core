@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
@@ -25,6 +26,24 @@ from core.operations.routes import router as operations_router
 from core.schemas.responses import StandardResponse
 from core.storage.postgres import AsyncSessionLocal, Base, engine
 from core.storage.redis import redis_manager
+
+
+async def start_sync_worker():
+    """
+    Main background loop that periodically checks and runs the event sync pipeline.
+    """
+    logger.info("Starting background event sync worker...")
+    sync_pipeline = SyncPipeline()
+    while True:
+        try:
+            logger.debug("Running background event sync cycle...")
+            await sync_pipeline.run_cycle()
+        except asyncio.CancelledError:
+            logger.info("Background sync worker cancelled.")
+            break
+        except Exception as e:
+            logger.error(f"Unhandled error in background sync worker: {e}")
+        await asyncio.sleep(10)
 
 
 @asynccontextmanager
@@ -63,10 +82,19 @@ async def lifespan(app: FastAPI):
 
     logger.info("econiq Backend Operational.")
 
+    # Start lightweight background processing tasks
+    app.state.sync_task = asyncio.create_task(start_sync_worker())
+    from core.intelligence.background_worker import start_background_worker
+    app.state.worker_task = asyncio.create_task(start_background_worker())
+
     yield
 
     # Shutdown Logic
     logger.info("Shutting down econiq Backend...")
+    if hasattr(app.state, "sync_task"):
+        app.state.sync_task.cancel()
+    if hasattr(app.state, "worker_task"):
+        app.state.worker_task.cancel()
     await redis_manager.disconnect()
     await engine.dispose()
     logger.info("Shutdown complete.")
