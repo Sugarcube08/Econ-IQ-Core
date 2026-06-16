@@ -7,7 +7,7 @@ class DisciplineDimensionEngine:
     Dimension 2: Financial Discipline
     Focus: Payment reliability and promptness.
     """
-    def compute(self, settlement_df: pl.DataFrame, rhythm_df: pl.DataFrame) -> pl.DataFrame:
+    def compute(self, settlement_df: pl.DataFrame, rhythm_df: pl.DataFrame, org_metrics: dict | None = None) -> pl.DataFrame:
         empty_schema = {"customer_id": pl.Utf8, "date": pl.Date, "dim_discipline": pl.Float64}
         if settlement_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
@@ -37,9 +37,15 @@ class DisciplineDimensionEngine:
 
         # Sub-scores
         df = df.with_columns(
-            (1.0 - (pl.col("avg_repayment_days") / 90.0).clip(0, 1)).alias("promptness_score"), # >90 days is 0 score
-            pl.col("repayment_regularity_score").alias("reliability_score"),
-            (1.0 - (pl.col("repayment_fragmentation") / 5.0).clip(0, 1)).alias("fragmentation_score") # >5 fragments per invoice is 0 score
+            pl.when(pl.col("avg_repayment_days") <= 45.0)
+            .then(1.0)
+            .otherwise((1.0 - ((pl.col("avg_repayment_days") - 45.0) / 135.0)).clip(0, 1))
+            .alias("promptness_score"),
+            (1.0 - (pl.col("repayment_regularity_score") * 0.5).clip(0, 1)).alias("reliability_score"),
+            pl.when(pl.col("repayment_fragmentation") <= 1.0)
+            .then(1.0)
+            .otherwise((1.0 - ((pl.col("repayment_fragmentation") - 1.0) / 4.0)).clip(0, 1))
+            .alias("fragmentation_score")
         )
 
         # Dimension Score

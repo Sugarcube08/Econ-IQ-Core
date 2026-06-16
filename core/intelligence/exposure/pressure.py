@@ -84,13 +84,11 @@ class ExposurePressureEngine:
         monthly_billing = pl.max_horizontal(pl.col("sales_window") / (context.window_days / 30.0), 1.0)
         total_outstanding_score = (1.0 - (pl.col("avg_outstanding") / (monthly_billing * 3.0))).clip(0, 1)
 
-        # Subfactor 4.2: Overdue Amount (25%)
-        # Normalization: No overdue = 1.0 | 1 bill overdue >120p = 0.0 | 3+ bills >60p = 0.2
         overdue_penalty = (
-            (pl.col("overdue_60_90_count") * 0.2)
-            + (pl.col("overdue_90_120_count") * 0.5)
-            + (pl.col("overdue_120p_count") * 1.0)
-        ).clip(0, 1)
+            (pl.col("overdue_60_90_count") * 0.1)
+            + (pl.col("overdue_90_120_count") * 0.2)
+            + (pl.col("overdue_120p_count") * 0.4)
+        ).clip(0, 0.8)
         overdue_score = (1.0 - overdue_penalty)
 
         # Subfactor 4.3: Outstanding Aging (25%)
@@ -194,7 +192,7 @@ class ExposurePressureEngine:
         df = df.join(current_outstanding, on="customer_id", how="left")
 
         df = df.with_columns(
-            (pl.col("current_outstanding") / pl.max_horizontal(pl.col("max_outstanding"), 1.0))
+            (pl.col("current_outstanding") / pl.max_horizontal(pl.col("sales_window"), 1.0))
             .clip(0, 1)
             .alias("unresolved_exposure_ratio")
         )
@@ -202,14 +200,18 @@ class ExposurePressureEngine:
         # Repayment Sufficiency: How effectively payments reduce debt
         # High when clearance is high AND unresolved ratio is low
         df = df.with_columns(
-            (pl.col("debt_clearance_ratio") * (1.0 - pl.col("unresolved_exposure_ratio")))
+            (pl.col("debt_clearance_ratio") * 0.7 + (1.0 - pl.col("unresolved_exposure_ratio")) * 0.3)
             .clip(0, 1)
             .alias("repayment_sufficiency")
         )
 
         # Clearance Strength: Balance between persistence and resolution
-        # Penalized by debit persistence
-        persistence_penalty = (pl.col("peak_debit_persistence") / (context.window_days * 0.5)).clip(0, 1)
+        # Penalized by debit persistence (Max 40% reduction, scaled by fraction of unpaid debt)
+        persistence_penalty = (
+            (pl.col("peak_debit_persistence") / (context.window_days * 1.0)).clip(0, 1)
+            * 0.4
+            * (1.0 - pl.col("debt_clearance_ratio"))
+        )
         df = df.with_columns(
             (pl.col("repayment_sufficiency") * (1.0 - persistence_penalty)).clip(0, 1).alias("clearance_strength")
         )

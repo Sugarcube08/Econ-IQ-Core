@@ -61,16 +61,20 @@ async def lifespan(app: FastAPI):
     app.state.sync_pipeline = sync_pipeline
 
     # Initialize Persistence
+    # Skip all schema mutations in production; only run read-only validation
+    is_production = settings.APP_ENV == "production"
+
     if not settings.SKIP_SCHEMA_VERIFICATION:
-        async with engine.begin() as conn:
-            try:
-                await conn.run_sync(Base.metadata.create_all)
-                FailureRegistry.recover("DB_SCHEMA_VERIFY_RACE")
-            except Exception as e:
-                if "already exists" in str(e):
-                    FailureRegistry.record("DB_SCHEMA_VERIFY_RACE", f"Database schema verification race condition handled: {e}", "WARNING", extra={"error": str(e)})
-                else:
-                    raise
+        if not is_production:
+            async with engine.begin() as conn:
+                try:
+                    await conn.run_sync(Base.metadata.create_all)
+                    FailureRegistry.recover("DB_SCHEMA_VERIFY_RACE")
+                except Exception as e:
+                    if "already exists" in str(e):
+                        FailureRegistry.record("DB_SCHEMA_VERIFY_RACE", f"Database schema verification race condition handled: {e}", "WARNING", extra={"error": str(e)})
+                    else:
+                        raise
 
         # Run strict schema validation (Zero mutations, verification only)
         async with engine.connect() as conn:
@@ -87,8 +91,11 @@ async def lifespan(app: FastAPI):
                     )
             await conn.run_sync(validate_schema)
 
-        async with AsyncSessionLocal() as session:
-            await sync_pipeline.upgrade_raw_tables_schema(session)
+        if not is_production:
+            async with AsyncSessionLocal() as session:
+                await sync_pipeline.upgrade_raw_tables_schema(session)
+        else:
+            logger.info("SYSTEM | Production environment: skipping raw table schema upgrades (zero mutation policy)")
     else:
         logger.info("SYSTEM | Skipping database schema verification (SKIP_SCHEMA_VERIFICATION=True)")
 

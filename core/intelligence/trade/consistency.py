@@ -11,7 +11,7 @@ class TradeConsistencyEngine:
     """
 
     def compute_consistency(
-        self, ledger_df: pl.DataFrame, cadence_df: pl.DataFrame, context: AnalysisContext
+        self, ledger_df: pl.DataFrame, cadence_df: pl.DataFrame, context: AnalysisContext, org_metrics: dict | None = None
     ) -> pl.DataFrame:
         empty_schema = {
             "customer_id": pl.Utf8,
@@ -37,14 +37,21 @@ class TradeConsistencyEngine:
 
         # 3. Trade Regularity Score
         # Regularity is high if participation density is high AND variance in gaps is low
+        p95_density = max(0.01, (org_metrics or {}).get("p95_density", 0.5))
+        normalized_density = (pl.col("participation_density") / p95_density).clip(0, 1)
+
         df = df.with_columns(
-            (pl.col("stddev_gap") / pl.max_horizontal(pl.col("median_gap"), 1.0))
-            .fill_null(1.0)
+            pl.when(pl.col("median_gap") <= 30.0)
+            .then(pl.lit(0.0))
+            .otherwise(
+                (pl.col("stddev_gap") / pl.max_horizontal(pl.col("median_gap"), 1.0))
+                .fill_null(1.0)
+            )
             .alias("gap_variance_ratio")
         )
 
         df = df.with_columns(
-            (pl.col("participation_density") * 0.7 + (1.0 - pl.col("gap_variance_ratio").clip(0, 1)) * 0.3).alias(
+            (normalized_density * 0.7 + (1.0 - pl.col("gap_variance_ratio").clip(0, 1)) * 0.3).alias(
                 "trade_regularity_score"
             )
         )

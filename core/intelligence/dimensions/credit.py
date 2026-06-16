@@ -7,7 +7,7 @@ class CreditDimensionEngine:
     Dimension 3: Credit Behavior
     Focus: Leverage and exposure management.
     """
-    def compute(self, pressure_df: pl.DataFrame) -> pl.DataFrame:
+    def compute(self, pressure_df: pl.DataFrame, org_metrics: dict | None = None) -> pl.DataFrame:
         empty_schema = {"customer_id": pl.Utf8, "date": pl.Date, "dim_credit": pl.Float64}
         if pressure_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
@@ -36,8 +36,11 @@ class CreditDimensionEngine:
         # exposure_pressure_score in V1 goes up when bad. We invert it.
         
         df = df.with_columns(
-            (1.0 - pl.col("exposure_pressure_score").clip(0, 1)).alias("pressure_management_score"),
-            (1.0 - pl.col("unresolved_exposure_ratio").clip(0, 1)).alias("utilization_score"),
+            (1.0 - (pl.col("exposure_pressure_score") / 3.0)).clip(0, 1).alias("pressure_management_score"),
+            pl.when(pl.col("unresolved_exposure_ratio") <= 0.15)
+            .then(1.0)
+            .otherwise((1.0 - ((pl.col("unresolved_exposure_ratio") - 0.15) / 0.85)).clip(0, 1))
+            .alias("utilization_score"),
             pl.col("clearance_strength").clip(0, 1).alias("clearance_score")
         )
 

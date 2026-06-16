@@ -238,7 +238,8 @@ class IntelligenceRepository:
                 SELECT 
                     customer_id, 
                     SUM(amount) as total_sales,
-                    COUNT(DISTINCT event_date) as active_days
+                    COUNT(DISTINCT event_date) as active_days,
+                    (MAX(event_date) - MIN(event_date)) as duration_days
                 FROM event_ledger
                 WHERE event_type = 'SALE' 
                   AND event_date >= :start_date 
@@ -249,7 +250,8 @@ class IntelligenceRepository:
             SELECT 
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY total_sales) as p95_billing,
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY active_days) as p95_active_days,
-                AVG(total_sales) as avg_org_billing
+                AVG(total_sales) as avg_org_billing,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_days) as p95_duration_days
             FROM customer_stats;
         """)
 
@@ -259,6 +261,7 @@ class IntelligenceRepository:
         p95_billing = float(row[0]) if row and row[0] is not None else 100000.0
         p95_active_days = float(row[1]) if row and row[1] is not None else 0.4 * (end_date - start_date).days
         avg_org_billing = float(row[2]) if row and row[2] is not None else 10000.0
+        p95_duration_days = float(row[3]) if row and row[3] is not None else 365.0
 
         window_days = (end_date - start_date).days or 1
         p95_density = p95_active_days / window_days
@@ -267,6 +270,7 @@ class IntelligenceRepository:
             "p95_billing": p95_billing,
             "p95_density": p95_density,
             "avg_org_billing": avg_org_billing,
+            "p95_duration_days": p95_duration_days,
         }
 
         # Cache organization-wide metrics for 5 minutes

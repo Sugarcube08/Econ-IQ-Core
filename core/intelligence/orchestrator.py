@@ -22,11 +22,8 @@ from core.intelligence.exposure.pressure import ExposurePressureEngine
 from core.intelligence.ledger.reconstruction import LedgerReconstructionEngine
 from core.intelligence.meta.scores import MetaScoreEngine
 from core.intelligence.payment.rhythm import PaymentRhythmEngine
-from core.intelligence.relationship.engine import RelationshipEngine
-from core.intelligence.resilience.engine import ResilienceEngine
 from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.intelligence.states.engine import StateEngine
-from core.intelligence.stress.engine import StressEngine
 from core.intelligence.trade.consistency import TradeConsistencyEngine
 from core.intelligence.validator import IntelligenceIntegrityValidator
 from core.ledger.context import LedgerContextService
@@ -63,9 +60,7 @@ class IntelligenceOrchestrator:
         self.meta_scores = MetaScoreEngine()
         self.state_engine = StateEngine()
         
-        self.stress_engine = StressEngine()
-        self.relationship_engine = RelationshipEngine()
-        self.resilience_engine = ResilienceEngine()
+        pass
 
     def compute_intelligence(
         self, runtime_df: pl.DataFrame, context: AnalysisContext, org_metrics: dict | None = None, customer_avg_billing: dict | None = None
@@ -86,7 +81,7 @@ class IntelligenceOrchestrator:
         settlement_df_all = self.settlement_engine.compute_settlements(runtime_df, context)
         rhythm_df_all = self.payment_rhythm.compute_rhythm(runtime_df, context)
         pressure_df_all = self.exposure_pressure.compute_pressure(exposure_df_all, features_df, context)
-        consistency_df = self.trade_consistency.compute_consistency(runtime_df, cadence_df, context)
+        consistency_df = self.trade_consistency.compute_consistency(runtime_df, cadence_df, context, org_metrics=org_metrics)
 
         conf_df = self.confidence_engine.compute(features_df, context, org_metrics=org_metrics)
 
@@ -99,14 +94,14 @@ class IntelligenceOrchestrator:
                 pressure_df_all = pressure_df_all.join(latest_dates, on="customer_id", how="left")
 
         # 3. V2 Dimensions
-        dim_activity_df = self.dim_activity.compute(features_df)
-        dim_discipline_df = self.dim_discipline.compute(settlement_df_all, rhythm_df_all)
-        dim_credit_df = self.dim_credit.compute(pressure_df_all)
-        dim_relationship_df = self.dim_relationship.compute(features_df, consistency_df)
-        dim_product_df = self.dim_product.compute(features_df)
-        dim_friction_df = self.dim_friction.compute(features_df)
-        dim_growth_df = self.dim_growth.compute(features_df)
-        dim_stability_df = self.dim_stability.compute(features_df, consistency_df)
+        dim_activity_df = self.dim_activity.compute(features_df, org_metrics=org_metrics)
+        dim_discipline_df = self.dim_discipline.compute(settlement_df_all, rhythm_df_all, org_metrics=org_metrics)
+        dim_credit_df = self.dim_credit.compute(pressure_df_all, org_metrics=org_metrics)
+        dim_relationship_df = self.dim_relationship.compute(features_df, consistency_df, org_metrics=org_metrics)
+        dim_product_df = self.dim_product.compute(features_df, org_metrics=org_metrics)
+        dim_friction_df = self.dim_friction.compute(features_df, org_metrics=org_metrics)
+        dim_growth_df = self.dim_growth.compute(features_df, org_metrics=org_metrics)
+        dim_stability_df = self.dim_stability.compute(features_df, consistency_df, org_metrics=org_metrics)
 
         # Base frame
         dimensions_df = features_df.select(["customer_id", "date"])
@@ -139,28 +134,18 @@ class IntelligenceOrchestrator:
         states_df = states_df.join(meta_scores_df, on=["customer_id", "date"], how="left")
         states_df = states_df.join(dimensions_df.drop(["date"]), on=["customer_id"], how="left")
 
-        # 7. Compute Relationship and Resilience Engines
-        relationship_df = self.relationship_engine.compute(features_df, consistency_df)
-        stress_df = self.stress_engine.compute(features_df)
-        resilience_df = self.resilience_engine.compute(features_df, stress_df, rhythm_df_all, consistency_df)
-
-        # Join Relationship and Resilience Scores
-        if not relationship_df.is_empty():
-            states_df = states_df.join(relationship_df.drop(["date"]), on="customer_id", how="left")
-        if not resilience_df.is_empty():
-            states_df = states_df.join(resilience_df.drop(["date"]), on="customer_id", how="left")
-
-
-        
-        if "resilience_score" not in states_df.columns:
-            states_df = states_df.with_columns(pl.lit(0.0).alias("resilience_score"))
-        else:
-            states_df = states_df.with_columns(pl.col("resilience_score").fill_null(0.0))
-
+        # Make sure relationship_score and resilience_score are present in states_df
+        # relationship_score is already in states_df from meta_scores_df
         if "relationship_score" not in states_df.columns:
             states_df = states_df.with_columns(pl.lit(0.0).alias("relationship_score"))
         else:
             states_df = states_df.with_columns(pl.col("relationship_score").fill_null(0.0))
+        
+        # resilience_score is deprecated but kept as 0.0 for schema compatibility
+        if "resilience_score" not in states_df.columns:
+            states_df = states_df.with_columns(pl.lit(0.0).alias("resilience_score"))
+        else:
+            states_df = states_df.with_columns(pl.col("resilience_score").fill_null(0.0))
         
         # MANDATORY: Join FINANCIAL exposure (is_ok=0) for outstanding balance reporting
         states_df = states_df.sort(["customer_id", "date"]).with_columns(pl.col("date").cast(pl.Date).set_sorted())
@@ -304,11 +289,25 @@ class IntelligenceOrchestrator:
 
             repo = IntelligenceRepository(session)
             
-            # 2. Define Windows anchored on CURRENT_DATE
-            # MANDATORY: Analysis is always anchored to real CURRENT_DATE.
-            # Future-dated events are ignored by ledger_context and IntelligenceRepository.
-            now = datetime.now(UTC)
-            # Normalize to the hour to allow TTL caching of organization-wide metrics across chunk runs
+            # Anchor to latest event date for these customers to avoid artificial dormancy/timezone mismatches
+            try:
+                from sqlalchemy import text
+                max_event_res = await session.execute(
+                    text("SELECT MAX(event_date) FROM event_ledger WHERE customer_id = ANY(:cids)"),
+                    {"cids": customer_ids}
+                )
+                max_event_date = max_event_res.scalar()
+                if max_event_date:
+                    now = datetime.combine(max_event_date, datetime.min.time())
+                else:
+                    global_res = await session.execute(text("SELECT MAX(event_date) FROM event_ledger"))
+                    global_date = global_res.scalar()
+                    if global_date:
+                        now = datetime.combine(global_date, datetime.min.time())
+                    else:
+                        now = datetime.now(UTC)
+            except Exception:
+                now = datetime.now(UTC)
             current_end = now.replace(minute=0, second=0, microsecond=0)
 
             current_start = current_end - timedelta(days=365)

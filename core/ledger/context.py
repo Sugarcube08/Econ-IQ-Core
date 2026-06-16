@@ -20,28 +20,47 @@ class LedgerContextService:
     async def load_customer_history(self, session: AsyncSession, customer_ids: list[str]) -> pl.DataFrame:
         """
         Loads the FULL historical event timeline for a list of customer IDs from PostgreSQL.
-        MANDATORY: Live-injects opening_balance from raw_customers to ensure financial anchor is never missing.
+        MANDATORY: Live-injects opening_balance and static metadata from customers.
         """
         if not customer_ids:
             return pl.DataFrame()
 
         customer_ids = [str(cid) for cid in customer_ids]
 
-        # 1. Fetch Live Opening Balances from customers
+        # 1. Fetch Live metadata from customers table
+        customer_meta = {}
+        opening_balances = {}
         try:
             from core.storage.postgres import get_reflected_table
             customers_tbl = await get_reflected_table("customers", session)
             
-            if customers_tbl is not None and "opening_balance" in customers_tbl.c:
-                opening_stmt = select(customers_tbl.c.id, customers_tbl.c.opening_balance).where(
+            if customers_tbl is not None:
+                cols = [
+                    customers_tbl.c.id,
+                    customers_tbl.c.registration_date,
+                    customers_tbl.c.business_type,
+                    customers_tbl.c.credit_limit,
+                    customers_tbl.c.payment_terms_days
+                ]
+                has_ob = "opening_balance" in customers_tbl.c
+                if has_ob:
+                    cols.append(customers_tbl.c.opening_balance)
+                
+                opening_stmt = select(*cols).where(
                     customers_tbl.c.id.in_(customer_ids)
                 )
                 opening_res = await session.execute(opening_stmt)
-                opening_balances = {str(row.id): float(row.opening_balance or 0.0) for row in opening_res.all()}
-            else:
-                opening_balances = {}
+                for row in opening_res.all():
+                    cid_str = str(row.id)
+                    opening_balances[cid_str] = float(row.opening_balance or 0.0) if has_ob else 0.0
+                    customer_meta[cid_str] = {
+                        "registration_date": row.registration_date,
+                        "business_type": row.business_type,
+                        "credit_limit": float(row.credit_limit) if row.credit_limit is not None else None,
+                        "payment_terms_days": int(row.payment_terms_days) if row.payment_terms_days is not None else None
+                    }
         except Exception as e:
-            opening_balances = {}
+            logger.warning(f"Failed to fetch customer metadata in load_customer_history: {e}")
 
         # 2. Fetch history from EventLedger, excluding any stale OPENING_BALANCE events
         # OPTIMIZATION: Query specific columns directly to avoid SQLAlchemy ORM memory bloat and session identity map caching.
@@ -69,6 +88,7 @@ class LedgerContextService:
         # Convert to dicts, taking care of metadata_
         dicts = []
         for r in rows:
+            meta = customer_meta.get(r.customer_id, {})
             d = {
                 "event_id": r.event_id,
                 "customer_id": r.customer_id,
@@ -92,21 +112,27 @@ class LedgerContextService:
                 "quantity": None,
                 "tax_amount": None,
                 "unit_price": None,
-                "business_type": None,
-                "registration_date": None,
-                "credit_limit": None,
-                "payment_terms_days": None,
+                "business_type": meta.get("business_type"),
+                "registration_date": meta.get("registration_date"),
+                "credit_limit": meta.get("credit_limit"),
+                "payment_terms_days": meta.get("payment_terms_days"),
                 "return_reason": None,
             }
             if r.metadata_:
                 for k, v in r.metadata_.items():
                     if k in [
                         "discount_amount", "quantity", "tax_amount", 
-                        "unit_price", "credit_limit", "payment_terms_days"
+                        "unit_price"
                     ]:
                         d[k] = float(v) if v is not None else 0.0
-                    elif k == "registration_date":
+                    elif k == "registration_date" and d[k] is None:
                         d[k] = date.fromisoformat(v) if v is not None else None
+                    elif k == "business_type" and d[k] is None:
+                        d[k] = v
+                    elif k == "credit_limit" and d[k] is None:
+                        d[k] = float(v) if v is not None else None
+                    elif k == "payment_terms_days" and d[k] is None:
+                        d[k] = int(v) if v is not None else None
                     else:
                         d[k] = v
             dicts.append(d)

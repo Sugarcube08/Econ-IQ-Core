@@ -7,7 +7,7 @@ class ProductDimensionEngine:
     Dimension 5: Product Behavior (Consolidated: Product + Concentration)
     Focus: Catalog penetration and concentration risk.
     """
-    def compute(self, features_df: pl.DataFrame) -> pl.DataFrame:
+    def compute(self, features_df: pl.DataFrame, org_metrics: dict | None = None) -> pl.DataFrame:
         empty_schema = {"customer_id": pl.Utf8, "date": pl.Date, "dim_product": pl.Float64}
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
@@ -32,12 +32,12 @@ class ProductDimensionEngine:
         )
 
         # Diversification / SKU Breadth
-        # Assume > 5 categories is high diversity
+        # Assume > 3 categories is high diversity
         df = df.with_columns(
-            (pl.col("category_diversity_count") / 5.0).clip(0, 1).alias("category_diversity_score"),
+            (pl.col("category_diversity_count") / 3.0).clip(0, 1).alias("category_diversity_score"),
             # Products per sales event (Basket Complexity / SKU Breadth)
             pl.when(pl.col("sales_events_window") > 0)
-            .then((pl.col("product_diversity_count") / pl.col("sales_events_window")).clip(0, 5) / 5.0)
+            .then((pl.col("product_diversity_count") / pl.col("sales_events_window")).clip(0, 3) / 3.0)
             .otherwise(0.0)
             .alias("basket_complexity_score")
         )

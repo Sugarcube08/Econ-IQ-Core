@@ -7,7 +7,7 @@ class FrictionDimensionEngine:
     Dimension 6: Operational Friction
     Focus: Exception rates, dispute frequency, returns.
     """
-    def compute(self, features_df: pl.DataFrame) -> pl.DataFrame:
+    def compute(self, features_df: pl.DataFrame, org_metrics: dict | None = None) -> pl.DataFrame:
         empty_schema = {"customer_id": pl.Utf8, "date": pl.Date, "dim_friction": pl.Float64}
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)

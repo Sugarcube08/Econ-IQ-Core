@@ -7,11 +7,15 @@ class StabilityDimensionEngine:
     Dimension 8: Stability & Predictability (Consolidated: Stability + Maturity)
     Focus: Variance, operational cadence, and tenure.
     """
-    def compute(self, features_df: pl.DataFrame, consistency_df: pl.DataFrame) -> pl.DataFrame:
+    def compute(self, features_df: pl.DataFrame, consistency_df: pl.DataFrame, org_metrics: dict | None = None) -> pl.DataFrame:
         empty_schema = {"customer_id": pl.Utf8, "date": pl.Date, "dim_stability": pl.Float64}
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
+        if org_metrics is None:
+            org_metrics = {"p95_duration_days": 1095.0}
+            
+        p95_duration_days = max(180.0, org_metrics.get("p95_duration_days", 1095.0))
 
         df = features_df.select(
             [
@@ -43,13 +47,14 @@ class StabilityDimensionEngine:
 
         # Tenure / Maturity sub-scores
         df = df.with_columns(
-            (pl.col("business_age_days") / 1825.0).clip(0, 1).alias("age_score"),
-            (pl.col("active_duration_days") / 1095.0).clip(0, 1).alias("relationship_age_score")
+            (pl.col("business_age_days") / (p95_duration_days * 1.5)).clip(0, 1).alias("age_score"),
+            (pl.col("active_duration_days") / p95_duration_days).clip(0, 1).alias("relationship_age_score")
         )
 
         # Stability sub-scores
+        p95_density = max(0.01, org_metrics.get("p95_density", 0.5))
         df = df.with_columns(
-            pl.col("participation_density").alias("cadence_stability"),
+            (pl.col("participation_density") / p95_density).clip(0, 1).alias("cadence_stability"),
             pl.col("trade_regularity_score").alias("variance_stability")
         )
 

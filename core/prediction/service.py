@@ -311,47 +311,72 @@ class PredictionService:
         self.ledger_context = LedgerContextService()
         self.feature_engineer = FeatureEngineer()
 
-    async def get_risk_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> RiskPrediction:
+    async def get_all_predictions(self, session: AsyncSession, customer_id: str, version: str | None = None) -> dict:
+        """Consolidated method to fetch all predictions using 1 database load and 1 feature generation."""
         features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("RISK", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "RISK", model.get_metadata().model_version, prediction)
-        return prediction
+        
+        # RISK
+        risk_model = model_registry.get_model("RISK", version)
+        risk_pred = risk_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "RISK", risk_model.get_metadata().model_version, risk_pred)
+        
+        # GROWTH
+        growth_model = model_registry.get_model("GROWTH", version)
+        growth_pred = growth_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "GROWTH", growth_model.get_metadata().model_version, growth_pred)
+        
+        # HEALTH
+        health_model = model_registry.get_model("HEALTH", version)
+        health_pred = health_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "HEALTH", health_model.get_metadata().model_version, health_pred)
+        
+        # CHURN
+        churn_model = model_registry.get_model("CHURN", version)
+        churn_pred = churn_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "CHURN", churn_model.get_metadata().model_version, churn_pred)
+        
+        # COLLECTION
+        collection_model = model_registry.get_model("COLLECTION", version)
+        collection_pred = collection_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "COLLECTION", collection_model.get_metadata().model_version, collection_pred)
+        
+        # OPPORTUNITY
+        opportunity_model = model_registry.get_model("OPPORTUNITY", version)
+        opportunity_pred = opportunity_model.predict(customer_id, features)
+        prediction_monitor.log_prediction(customer_id, "OPPORTUNITY", opportunity_model.get_metadata().model_version, opportunity_pred)
+        
+        return {
+            "risk": risk_pred,
+            "growth": growth_pred,
+            "health": health_pred,
+            "churn": churn_pred,
+            "collection": collection_pred,
+            "opportunity": opportunity_pred
+        }
+
+    async def get_risk_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> RiskPrediction:
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["risk"]
 
     async def get_growth_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> GrowthPrediction:
-        features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("GROWTH", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "GROWTH", model.get_metadata().model_version, prediction)
-        return prediction
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["growth"]
 
     async def get_health_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> HealthPrediction:
-        features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("HEALTH", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "HEALTH", model.get_metadata().model_version, prediction)
-        return prediction
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["health"]
 
     async def get_churn_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> ChurnPrediction:
-        features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("CHURN", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "CHURN", model.get_metadata().model_version, prediction)
-        return prediction
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["churn"]
 
     async def get_collection_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> CollectionPrediction:
-        features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("COLLECTION", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "COLLECTION", model.get_metadata().model_version, prediction)
-        return prediction
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["collection"]
 
     async def get_opportunity_prediction(self, session: AsyncSession, customer_id: str, version: str | None = None) -> OpportunityPrediction:
-        features = await self._load_features(session, customer_id)
-        model = model_registry.get_model("OPPORTUNITY", version)
-        prediction = model.predict(customer_id, features)
-        prediction_monitor.log_prediction(customer_id, "OPPORTUNITY", model.get_metadata().model_version, prediction)
-        return prediction
+        res = await self.get_all_predictions(session, customer_id, version)
+        return res["opportunity"]
 
     async def _load_features(self, session: AsyncSession, customer_id: str) -> pl.DataFrame:
         """Loads customer timeline and aggregates features."""
@@ -359,6 +384,17 @@ class PredictionService:
         if history_df.is_empty():
             return pl.DataFrame()
             
-        context = AnalysisContext(window_days=365, end_date=datetime.now(UTC).date())
+        try:
+            from sqlalchemy import text
+            max_pay_res = await session.execute(text("SELECT MAX(event_date) FROM event_ledger WHERE event_type = 'PAYMENT'"))
+            max_pay_date = max_pay_res.scalar()
+            if max_pay_date:
+                anchor_date = max_pay_date
+            else:
+                anchor_date = datetime.now(UTC).date()
+        except Exception:
+            anchor_date = datetime.now(UTC).date()
+
+        context = AnalysisContext(window_days=365, end_date=anchor_date)
         features_df = self.feature_engineer.compute_features(history_df, context)
         return features_df

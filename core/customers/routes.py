@@ -55,9 +55,23 @@ async def resolve_customer_dates(
     Future-dated events are never part of the commercial window.
     Enforces a standard 365-day canonical window.
     """
-    now = datetime.now(UTC).date()
-    s_date = now - timedelta(days=365)
-    e_date = now
+    if end_date:
+        e_date = end_date
+    else:
+        try:
+            from sqlalchemy import text
+            max_pay_res = await db.execute(text("SELECT MAX(event_date) FROM event_ledger WHERE event_type = 'PAYMENT'"))
+            max_pay_date = max_pay_res.scalar()
+            if max_pay_date:
+                e_date = max_pay_date
+            else:
+                from datetime import UTC
+                e_date = datetime.now(UTC).date()
+        except Exception:
+            from datetime import UTC
+            e_date = datetime.now(UTC).date()
+            
+    s_date = e_date - timedelta(days=window_days)
     return s_date, e_date
 
 
@@ -768,20 +782,15 @@ async def get_customer_predictions(
         raise StarletteHTTPException(status_code=404, detail=f"Customer {id} not found.")
 
     try:
-        risk_pred = await prediction_service.get_risk_prediction(db, id, version)
-        growth_pred = await prediction_service.get_growth_prediction(db, id, version)
-        health_pred = await prediction_service.get_health_prediction(db, id, version)
-        churn_pred = await prediction_service.get_churn_prediction(db, id, version)
-        collection_pred = await prediction_service.get_collection_prediction(db, id, version)
-        opportunity_pred = await prediction_service.get_opportunity_prediction(db, id, version)
+        preds = await prediction_service.get_all_predictions(db, id, version)
 
         data = {
-            "risk": risk_pred.model_dump(),
-            "growth": growth_pred.model_dump(),
-            "health": health_pred.model_dump(),
-            "churn": churn_pred.model_dump(),
-            "collection": collection_pred.model_dump(),
-            "opportunity": opportunity_pred.model_dump(),
+            "risk": preds["risk"].model_dump(),
+            "growth": preds["growth"].model_dump(),
+            "health": preds["health"].model_dump(),
+            "churn": preds["churn"].model_dump(),
+            "collection": preds["collection"].model_dump(),
+            "opportunity": preds["opportunity"].model_dump(),
         }
         return success_response("All predictions retrieved successfully", data=data, request=request)
     except KeyError as e:
