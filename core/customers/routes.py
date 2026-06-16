@@ -11,7 +11,6 @@ from core.core.dependencies import require_permissions
 from core.core.permissions import Permission
 from core.core.responses import success_response
 from core.intelligence.orchestrator import IntelligenceOrchestrator
-from core.intelligence.resilience import ResilientIntelligenceOrchestrator
 from core.models.auth_models import APIKey, User
 from core.models.state_models import CustomerIntelligence, EventLedger
 
@@ -718,21 +717,160 @@ async def get_customer_profile(
         start_date=prev_start.date()
     )
 
-    correlation_id = request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-    resilient_orchestrator = ResilientIntelligenceOrchestrator(db, correlation_id=correlation_id)
-    
-    res = await resilient_orchestrator.execute_resilient(
-        customer_id=id,
-        customer_basic=customer_basic,
-        curr_ctx=curr_ctx,
-        prev_ctx=prev_ctx,
-        orchestrator=orchestrator,
-        start_time=start_time
-    )
+    try:
+        curr_df = await orchestrator.run_dynamic([id], curr_ctx)
+        prev_df = await orchestrator.run_dynamic([id], prev_ctx)
+        
+        curr_row = curr_df.row(0, named=True)
+        prev_row = prev_df.row(0, named=True) if not prev_df.is_empty() else {}
+        
+        scores_dict = {
+            "health_score": curr_row.get("health_score") or 0.0,
+            "risk_score": curr_row.get("risk_score") or 0.0,
+            "growth_score": curr_row.get("growth_score") or 0.0,
+            "trust_score": curr_row.get("trust_score") or 0.0,
+            "opportunity_score": curr_row.get("opportunity_score") or 0.0,
+            "credit_score": curr_row.get("credit_score") or 0.0,
+            "collection_score": curr_row.get("collection_score") or 0.0,
+            "relationship_score": curr_row.get("relationship_score") or 0.0,
+            "outstanding_current": curr_row.get("outstanding_balance") or 0.0,
+            "outstanding_previous": prev_row.get("outstanding_balance") or 0.0,
+        }
+
+        deltas_dict = {
+            "health_score": round(scores_dict["health_score"] - (prev_row.get("health_score") or 0.0), 4),
+            "risk_score": round(scores_dict["risk_score"] - (prev_row.get("risk_score") or 0.0), 4),
+            "growth_score": round(scores_dict["growth_score"] - (prev_row.get("growth_score") or 0.0), 4),
+            "trust_score": round(scores_dict["trust_score"] - (prev_row.get("trust_score") or 0.0), 4),
+            "opportunity_score": round(scores_dict["opportunity_score"] - (prev_row.get("opportunity_score") or 0.0), 4),
+            "credit_score": round(scores_dict["credit_score"] - (prev_row.get("credit_score") or 0.0), 4),
+            "collection_score": round(scores_dict["collection_score"] - (prev_row.get("collection_score") or 0.0), 4),
+            "relationship_score": round(scores_dict["relationship_score"] - (prev_row.get("relationship_score") or 0.0), 4),
+            "outstanding_delta": round(scores_dict["outstanding_current"] - scores_dict["outstanding_previous"], 4),
+        }
+
+        last_purchased_ts = curr_row.get("last_purchased_at")
+        last_purchased_at = last_purchased_ts.strftime("%Y-%m-%d") if last_purchased_ts else None
+
+        curr_contrib = curr_row.get("contribution_score_current") or 0.0
+        prev_contrib = curr_row.get("contribution_score_previous") or 0.0
+
+        res_data = CustomerProfileResponseData(
+            customer=CustomerDetailSchema(
+                customer_id=id,
+                customer_name=customer_basic["customer_name"],
+                city=customer_basic["city_name"],
+                scores=CustomerScoreSchema(**scores_dict),
+                deltas=CustomerDeltaSchema(**deltas_dict),
+                behavior_state=curr_row.get("behavioral_state") or "UNKNOWN",
+                organization_contribution=OrgContributionSchema(
+                    current_percentage=round(curr_contrib, 2),
+                    delta=round(curr_contrib - prev_contrib, 4)
+                ),
+                last_purchased_at=last_purchased_at,
+                updated_at=datetime.now(UTC).isoformat()
+            )
+        )
+        res_mode = "FULL"
+        health_status = "HEALTHY"
+        forensics = {}
+        metadata_res = {}
+    except Exception as err:
+        cached_intel = await repo.get_latest_customer_state(id)
+        if cached_intel:
+            h_score = cached_intel.health_score or 0.0
+            h_prev = cached_intel.health_previous or 0.0
+            r_score = cached_intel.risk_score or 0.0
+            r_prev = cached_intel.risk_previous or 0.0
+            g_score = cached_intel.growth_score or 0.0
+            g_prev = cached_intel.growth_previous or 0.0
+            t_score = cached_intel.trust_score or 0.0
+            t_prev = cached_intel.trust_previous or 0.0
+            o_score = cached_intel.opportunity_score or 0.0
+            o_prev = cached_intel.opportunity_previous or 0.0
+            c_score = cached_intel.credit_score or 0.0
+            c_prev = cached_intel.credit_previous or 0.0
+            col_score = cached_intel.collection_score or 0.0
+            col_prev = cached_intel.collection_previous or 0.0
+            rel_score = cached_intel.relationship_score or 0.0
+            rel_prev = cached_intel.relationship_previous or 0.0
+            
+            out_val = cached_intel.outstanding_current or 0.0
+            out_prev_val = cached_intel.outstanding_previous or 0.0
+            contrib_val = cached_intel.contribution_current or 0.0
+            contrib_prev_val = cached_intel.contribution_previous or 0.0
+
+            res_data = CustomerProfileResponseData(
+                customer=CustomerDetailSchema(
+                    customer_id=id,
+                    customer_name=customer_basic["customer_name"],
+                    city=customer_basic["city_name"],
+                    scores=CustomerScoreSchema(
+                        health_score=h_score,
+                        risk_score=r_score,
+                        growth_score=g_score,
+                        trust_score=t_score,
+                        opportunity_score=o_score,
+                        credit_score=c_score,
+                        collection_score=col_score,
+                        relationship_score=rel_score,
+                        outstanding_current=out_val,
+                        outstanding_previous=out_prev_val,
+                    ),
+                    deltas=CustomerDeltaSchema(
+                        health_score=round(h_score - h_prev, 4),
+                        risk_score=round(r_score - r_prev, 4),
+                        growth_score=round(g_score - g_prev, 4),
+                        trust_score=round(t_score - t_prev, 4),
+                        opportunity_score=round(o_score - o_prev, 4),
+                        credit_score=round(c_score - c_prev, 4),
+                        collection_score=round(col_score - col_prev, 4),
+                        relationship_score=round(rel_score - rel_prev, 4),
+                        outstanding_delta=round(out_val - out_prev_val, 4),
+                    ),
+                    behavior_state=cached_intel.state or "UNKNOWN",
+                    organization_contribution=OrgContributionSchema(
+                        current_percentage=round(contrib_val, 2),
+                        delta=round(contrib_val - contrib_prev_val, 4)
+                    ),
+                    last_purchased_at=cached_intel.last_purchase_date.strftime("%Y-%m-%d") if cached_intel.last_purchase_date else None,
+                    updated_at=cached_intel.last_updated.isoformat() if cached_intel.last_updated else None
+                )
+            )
+            res_mode = "DEGRADED"
+            health_status = "TRANSIENT_FAILURE"
+            forensics = {"error": str(err)}
+            metadata_res = {"fallback_source": "materialized_cache"}
+        else:
+            res_data = CustomerProfileResponseData(
+                customer=CustomerDetailSchema(
+                    customer_id=id,
+                    customer_name=customer_basic["customer_name"],
+                    city=customer_basic["city_name"],
+                    scores=CustomerScoreSchema(
+                        health_score=0.0, risk_score=0.0, growth_score=0.0, trust_score=0.0,
+                        opportunity_score=0.0, credit_score=0.0, collection_score=0.0, relationship_score=0.0,
+                        outstanding_current=0.0, outstanding_previous=0.0
+                    ),
+                    deltas=CustomerDeltaSchema(
+                        health_score=0.0, risk_score=0.0, growth_score=0.0, trust_score=0.0,
+                        opportunity_score=0.0, credit_score=0.0, collection_score=0.0, relationship_score=0.0,
+                        outstanding_delta=0.0
+                    ),
+                    behavior_state="DEGRADED",
+                    organization_contribution=OrgContributionSchema(current_percentage=0.0, delta=0.0),
+                    last_purchased_at=None,
+                    updated_at=datetime.now(UTC).isoformat()
+                )
+            )
+            res_mode = "DEGRADED"
+            health_status = "TRANSIENT_FAILURE"
+            forensics = {"error": str(err)}
+            metadata_res = {"fallback_source": "minimal_degraded"}
 
     metadata = {
-        "mode": res.mode.value,
-        "health_status": res.health_status.value,
+        "mode": res_mode,
+        "health_status": health_status,
         "window_days": window_days,
         "start_date": curr_start.isoformat(),
         "end_date": curr_end.isoformat(),
@@ -740,13 +878,13 @@ async def get_customer_profile(
             "start_date": prev_start.isoformat(),
             "end_date": prev_end.isoformat(),
         },
-        "forensics": res.forensics,
-        **res.metadata
+        "forensics": forensics,
+        **metadata_res
     }
     
     return success_response(
-        f"Customer profile retrieved successfully ({res.mode.value} mode)", 
-        data=res.data.model_dump(), 
+        f"Customer profile retrieved successfully ({res_mode} mode)", 
+        data=res_data.model_dump(), 
         metadata=metadata, 
         request=request
     )

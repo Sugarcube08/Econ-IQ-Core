@@ -37,9 +37,7 @@ class Settings(BaseSettings):
 
     # RG Semantics
     ENABLE_RG_SEMANTIC_CLASSIFICATION: bool = True
-    CUSTOMER_RG_WEIGHT: float = 1.0
-    GENUINE_RG_WEIGHT: float = 1.0
-    UNKNOWN_RG_WEIGHT: float = 0.8
+
 
     # Cadence
     CADENCE_MIN_EVENTS: int = 3
@@ -69,7 +67,6 @@ class Settings(BaseSettings):
 
     # Feature Toggles
     EMAIL_SERVICE: bool = Field(True, validation_alias="EMAIL_SERVICE")
-    ENABLE_BACKGROUND_WORKERS: bool = Field(True, validation_alias="ENABLE_BACKGROUND_WORKERS")
     STARTUP_MODE: str = Field("full", validation_alias="STARTUP_MODE")
     SKIP_SCHEMA_VERIFICATION: bool = Field(False, validation_alias="SKIP_SCHEMA_VERIFICATION")
 
