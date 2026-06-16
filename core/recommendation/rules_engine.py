@@ -17,6 +17,7 @@ class RecommendationRulesEngine:
     """
     Evaluates credit rules and generates persistent credit policy recommendations.
     """
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -24,26 +25,25 @@ class RecommendationRulesEngine:
         """
         Calculates credit recommendations based on customer score thresholds and saves them.
         """
-        
+
         # 1. Fetch relevant customer intelligence scores
         stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
         res = await session.execute(stmt)
         intel = res.scalars().first()
 
         if not intel:
-            return CustomerRecommendations(customer_id=customer_id, generated_date=datetime.now(UTC).date(), recommendations=[])
+            return CustomerRecommendations(
+                customer_id=customer_id, generated_date=datetime.now(UTC).date(), recommendations=[]
+            )
 
         # 2. Clear existing ACTIVE recommendations for this customer
         await session.execute(
-            delete(Recommendation).where(
-                Recommendation.customer_id == customer_id,
-                Recommendation.status == "ACTIVE"
-            )
+            delete(Recommendation).where(Recommendation.customer_id == customer_id, Recommendation.status == "ACTIVE")
         )
 
         # 3. Rules Engine Execution
         recs_to_add = []
-        
+
         h_score = intel.health_score or 0.0
         r_score = intel.risk_score or 0.0
         g_score = intel.growth_score or 0.0
@@ -64,7 +64,7 @@ class RecommendationRulesEngine:
                     reason="Customer shows strong commercial growth with exceptionally low credit risk profile.",
                     confidence=0.90,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -79,7 +79,7 @@ class RecommendationRulesEngine:
                     reason="Debtor shows high prompt payment trust, qualifying for credit limit expansion.",
                     confidence=0.85,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -94,7 +94,7 @@ class RecommendationRulesEngine:
                     reason="Customer credit metrics are stable within normal operating thresholds.",
                     confidence=0.80,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -109,12 +109,12 @@ class RecommendationRulesEngine:
                     reason="Deterioration in behavioral health indicators; account requires analyst review.",
                     confidence=0.85,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
         # Rule 5: Reduce Exposure (High risk)
-        if r_score >= 0.70 or c_score < 0.30:
+        if r_score >= 0.70 or c_score >= 0.70:
             recs_to_add.append(
                 Recommendation(
                     id=str(uuid.uuid4()),
@@ -124,7 +124,7 @@ class RecommendationRulesEngine:
                     reason="Risk score exceeded threshold. Suggest reducing credit exposure boundaries.",
                     confidence=0.90,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -139,20 +139,19 @@ class RecommendationRulesEngine:
                     reason="Deteriorating credit state matches liquidity distress thresholds. Flagged for immediate outreach.",
                     confidence=0.95,
                     status="ACTIVE",
-                    created_at=datetime.now(UTC)
+                    created_at=datetime.now(UTC),
                 )
             )
 
         # Persist new recommendations
         for r in recs_to_add:
             session.add(r)
-        
+
         await session.flush()
 
         # 4. Fetch all ACTIVE recommendations from DB to return
         stmt = select(Recommendation).where(
-            Recommendation.customer_id == customer_id,
-            Recommendation.status == "ACTIVE"
+            Recommendation.customer_id == customer_id, Recommendation.status == "ACTIVE"
         )
         res = await session.execute(stmt)
         db_recs = res.scalars().all()
@@ -218,7 +217,7 @@ class RecommendationRulesEngine:
                     expected_impact=impact,
                     confidence=r.confidence,
                     action_category=action_cat,
-                    value=val
+                    value=val,
                 )
             )
 

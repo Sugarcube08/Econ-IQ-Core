@@ -4,7 +4,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Enable bytecode compilation and increase HTTP timeout to handle large packages on slower connections
+# Enable bytecode compilation and increase HTTP timeout
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_HTTP_TIMEOUT=300
 
@@ -28,7 +28,7 @@ COPY --from=builder /app/.venv /app/.venv
 # Update path to use the virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Prevent Python from writing .pyc files to disk and ensure stdout/stderr are unbuffered
+# Prevent Python from writing .pyc files and ensure stdout/stderr are unbuffered
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -45,5 +45,7 @@ USER appuser
 # Expose the application port
 EXPOSE 8000
 
-# Run the application using Uvicorn
-CMD ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Run only the API service (skipping background tasks inside uvicorn)
+ENV STARTUP_MODE="api"
+
+CMD ["python", "api_runner.py"]

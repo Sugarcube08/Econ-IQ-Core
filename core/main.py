@@ -105,9 +105,10 @@ async def lifespan(app: FastAPI):
     logger.info("SYSTEM | econiq Backend Operational")
 
     # Start lightweight background processing tasks
-    app.state.sync_task = asyncio.create_task(start_sync_worker())
-    from core.intelligence.background_worker import start_background_worker
-    app.state.worker_task = asyncio.create_task(start_background_worker())
+    if settings.STARTUP_MODE == "full":
+        app.state.sync_task = asyncio.create_task(start_sync_worker())
+        from core.intelligence.background_worker import start_background_worker
+        app.state.worker_task = asyncio.create_task(start_background_worker())
 
     yield
 

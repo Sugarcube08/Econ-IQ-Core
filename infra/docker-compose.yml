@@ -1,0 +1,62 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: econiq-redis
+    network_mode: host
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: econiq-api
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      - MALLOC_ARENA_MAX=2
+      - POLARS_MAX_THREADS=2
+      - STARTUP_MODE=api
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    container_name: econiq-worker
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      - MALLOC_ARENA_MAX=2
+      - POLARS_MAX_THREADS=2
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  ml:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.ml
+    container_name: econiq-ml
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      - MALLOC_ARENA_MAX=2
+      - POLARS_MAX_THREADS=1
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:
+    driver: local
