@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     SYNC_BATCH_SIZE: int = Field(500, validation_alias="SYNC_BATCH_SIZE")
     INTELLIGENCE_CHUNK_SIZE: int = Field(10, validation_alias="INTELLIGENCE_CHUNK_SIZE")
     RECOMPUTE_BATCH_SIZE: int = Field(10, validation_alias="RECOMPUTE_BATCH_SIZE")
+    WORKER_SLEEP_SECONDS: int = Field(2, validation_alias="WORKER_SLEEP_SECONDS")
 
     # Security Policies
     OTP_PEPPER: str | None = Field(None, validation_alias="OTP_PEPPER")
