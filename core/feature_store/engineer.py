@@ -28,7 +28,7 @@ class FeatureEngineer:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug(f"Computing longitudinal rolling features for window: {context.window_str}")
+        logger.debug("PROCESSING | Computing longitudinal rolling features", extra={"window": context.window_str})
 
         # MANDATORY SCHEMA ALIGNMENT: Ensure all required columns exist before group-by
         required_cols = {

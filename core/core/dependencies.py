@@ -115,7 +115,7 @@ def require_permissions(required: list[Permission]):
             missing = [p for p in required if p.value not in key_scopes]
             
         if missing:
-            logger.warning(f"Permission denied for {identity.id}. Missing: {[p.value for p in missing]}")
+            logger.warning("SECURITY | Permission denied", extra={"identity_id": str(identity.id), "missing": [p.value for p in missing]})
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, 
                 detail="Insufficient privileges"

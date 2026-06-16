@@ -28,7 +28,7 @@ class SyncPipeline:
     async def upgrade_raw_tables_schema(self, session: AsyncSession):
         """DDL migration to ensure external raw tables have state-tracking columns."""
         raw_tables = ["raw_sales", "raw_payments", "raw_returns", "customers"]
-        logger.info("Verifying raw tables schemas and upgrading if necessary...")
+        logger.info("SYSTEM | Verifying raw tables schemas")
         
         for table in raw_tables:
             try:
@@ -43,15 +43,15 @@ class SyncPipeline:
                 
                 # Commit after each table to release locks and reset transaction timer
                 await session.commit()
-                logger.debug(f"Schema verification completed for table: {table}")
+                logger.debug("SYSTEM | Schema verification completed for table", extra={"table_name": table})
             except Exception as e:
                 # We log and rollback for the specific table, but continue for others
-                logger.warning(f"Potential timeout or lock issue upgrading table {table}: {e}")
+                logger.warning("FAILURE | Potential timeout or lock issue upgrading table", extra={"table_name": table, "error": str(e)})
                 await session.rollback()
                 # If it's a critical failure (like table not existing), we'll find out during sync
                 continue
         
-        logger.info("Raw table schemas verification lifecycle complete.")
+        logger.info("SYSTEM | Raw table schemas verification complete")
 
     async def run_cycle(self) -> bool:
         """
@@ -61,7 +61,7 @@ class SyncPipeline:
         async with AsyncSessionLocal() as session:
             # 1. Acquire Session-level Advisory Lock (Key: 42069)
             # Session-level lock is used to control concurrency across multiple transaction boundaries.
-            logger.debug(f"Worker {self.worker_id} attempting to acquire PostgreSQL advisory lock...")
+            logger.debug("PROCESSING | Worker attempting to acquire PostgreSQL advisory lock", extra={"worker_id": self.worker_id})
             try:
                 lock_res = await session.execute(text("SELECT pg_try_advisory_lock(42069)"))
                 lock_acquired = bool(lock_res.scalar())
@@ -70,16 +70,16 @@ class SyncPipeline:
                 if session.in_transaction():
                     await session.commit()
             except Exception as e:
-                logger.error(f"Error checking advisory lock: {e}")
+                logger.error("FAILURE | Error checking advisory lock", extra={"error": str(e)})
                 if session.in_transaction():
                     await session.rollback()
                 return False
 
             if not lock_acquired:
-                logger.debug("Advisory lock (42069) is held by another sync worker. Yielding execution.")
+                logger.debug("PROCESSING | Advisory lock (42069) is held by another sync worker. Yielding execution.")
                 return False
 
-            logger.debug(f"Worker {self.worker_id} acquired advisory lock. Starting synchronization cycle.")
+            logger.debug("PROCESSING | Worker acquired advisory lock. Starting synchronization cycle.", extra={"worker_id": self.worker_id})
             batch_id = str(uuid.uuid4())
             start_time = datetime.now(UTC)
 
@@ -95,7 +95,7 @@ class SyncPipeline:
                 "raw_returns": settings.SYNC_BATCH_SIZE
             }
             self.current_poll_multiplier = 1.0
-            logger.info(f"Sync Pipeline: Processing up to {settings.SYNC_BATCH_SIZE} rows per table.")
+            logger.info("PROCESSING | Sync Pipeline started", extra={"sync_batch_size": settings.SYNC_BATCH_SIZE})
             
             # State tracking for error handling
             claimed_ids = {}
@@ -248,7 +248,7 @@ class SyncPipeline:
 
                         # 4. If nothing claimed, finish immediately
                         if total_claimed == 0:
-                            logger.debug(f"Batch {batch_id}: No unprocessed records detected.")
+                            logger.debug("PROCESSING | No unprocessed records detected for batch", extra={"batch_id": batch_id})
                             # Clean up sync batch as completed with 0 rows
                             complete_stmt = (
                                 update(SyncBatch)
@@ -263,7 +263,7 @@ class SyncPipeline:
                             await session.execute(complete_stmt)
                             return False
 
-                        logger.debug(f"Processing batch {batch_id}: claimed {total_claimed} rows across raw tables")
+                        logger.debug("PROCESSING | Processing batch, claimed rows across raw tables", extra={"batch_id": batch_id, "total_claimed": total_claimed})
 
                         # 5. Materialize ledger events (if we have sales/payments/returns)
                         unique_customers_set = set()
@@ -309,18 +309,26 @@ class SyncPipeline:
 
                 # Commit transaction
                 duration = (datetime.now(UTC) - start_time).total_seconds()
+                sales_cnt = len(claimed_ids.get("raw_sales", []))
+                payments_cnt = len(claimed_ids.get("raw_payments", []))
+                returns_cnt = len(claimed_ids.get("raw_returns", []))
                 logger.info(
-                    f"Sync Batch Completed: batch_id={batch_id[:8]} | "
-                    f"rows={total_claimed} | "
-                    f"customers={len(unique_customers)} | "
-                    f"duration={duration:.2f}s | "
-                    f"worker={self.worker_id}"
+                    "PROCESSING | Sync Completed",
+                    extra={
+                        "Sales": sales_cnt,
+                        "Payments": payments_cnt,
+                        "Returns": returns_cnt,
+                        "Duration": f"{duration:.2f}s",
+                        "batch_id": batch_id[:8],
+                        "customers": len(unique_customers),
+                        "worker": self.worker_id
+                    }
                 )
                 return True
 
             except Exception as batch_error:
                 # If transaction fails, it rolls back automatically
-                logger.error(f"Error processing sync batch {batch_id}: {batch_error}")
+                logger.error("FAILURE | Error processing sync batch", extra={"batch_id": batch_id, "error": str(batch_error)})
 
                 # Save failure status in a new transaction
                 try:
@@ -350,9 +358,9 @@ class SyncPipeline:
                                     )
                                 )
                                 await session.execute(update_stmt)
-                    logger.debug(f"Successfully logged batch {batch_id} failure in DB.")
+                    logger.debug("PROCESSING | Successfully logged batch failure in DB.", extra={"batch_id": batch_id})
                 except Exception as log_error:
-                    logger.critical(f"Failed to log batch failure in database: {log_error}")
+                    logger.critical("FAILURE | Failed to log batch failure in database", extra={"error": str(log_error)})
 
                 return False
 
@@ -363,9 +371,9 @@ class SyncPipeline:
                     # End the transaction started by the unlock execute
                     if session.in_transaction():
                         await session.commit()
-                    logger.debug("PostgreSQL advisory lock released.")
+                    logger.debug("PROCESSING | PostgreSQL advisory lock released.")
                 except Exception as unlock_error:
-                    logger.critical(f"Failed to release advisory lock: {unlock_error}")
+                    logger.critical("FAILURE | Failed to release advisory lock", extra={"error": str(unlock_error)})
 
 
     async def has_pending_work(self) -> bool:

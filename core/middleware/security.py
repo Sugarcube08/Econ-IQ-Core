@@ -48,7 +48,7 @@ class HardenedSecurityMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception as e:
-            logger.exception(f"Unhandled exception in request {correlation_id}: {e}")
+            logger.exception("FAILURE | Unhandled exception in request", extra={"correlation_id": correlation_id, "error": str(e)})
             response = Response(content="Internal Server Error", status_code=500)
 
         # 4. Inject Security Headers
@@ -89,8 +89,14 @@ class HardenedSecurityMiddleware(BaseHTTPMiddleware):
         ).observe(duration)
 
         logger.info(
-            f"{request.method} {request.url.path} - {response.status_code} "
-            f"({duration:.4f}s) | Correlation: {correlation_id}"
+            "PROCESSING | HTTP Request Completed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration": f"{duration:.4f}s",
+                "correlation_id": correlation_id
+            }
         )
 
         return response

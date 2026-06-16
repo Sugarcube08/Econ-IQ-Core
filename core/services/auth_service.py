@@ -75,7 +75,7 @@ class AuthService:
             raw_otp = generate_otp()
         else:
             raw_otp = "735011"
-            logger.info(f"EMAIL_SERVICE is disabled. Using hardcoded OTP for user {user.email}")
+            logger.info("SECURITY | EMAIL_SERVICE is disabled. Using hardcoded OTP for user", extra={"user_id": str(user.id)})
 
         hashed_otp = hash_otp(raw_otp)
 

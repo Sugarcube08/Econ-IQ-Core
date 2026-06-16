@@ -36,7 +36,7 @@ class CollectionsService:
         )
         db_session.add(activity)
         await db_session.flush()
-        logger.info(f"Collection activity logged for customer {customer_id} by user {user_id}")
+        logger.info("BUSINESS | Collection activity logged", extra={"customer_id": customer_id, "user_id": user_id, "activity_type": activity_type, "outcome": outcome})
         return activity
 
     async def get_activities(
@@ -76,7 +76,7 @@ class CollectionsService:
         )
         db_session.add(commitment)
         await db_session.flush()
-        logger.info(f"Payment commitment of {amount} logged for customer {customer_id} on {promised_date}")
+        logger.info("BUSINESS | Payment commitment logged", extra={"customer_id": customer_id, "amount": amount, "promised_date": str(promised_date)})
         return commitment
 
     async def get_commitments(
@@ -125,7 +125,7 @@ class CollectionsService:
 
             if total_paid >= commitment.amount:
                 commitment.status = "KEPT"
-                logger.info(f"Payment commitment {commitment.id} marked KEPT. Paid {total_paid} >= promised {commitment.amount}")
+                logger.info("BUSINESS | Payment commitment KEPT", extra={"commitment_id": commitment.id, "customer_id": customer_id, "amount": commitment.amount, "total_paid": total_paid})
             elif date.today() > commitment.promised_date:
                 commitment.status = "BROKEN"
-                logger.info(f"Payment commitment {commitment.id} marked BROKEN. Overdue since {commitment.promised_date}")
+                logger.info("BUSINESS | Payment commitment BROKEN", extra={"commitment_id": commitment.id, "customer_id": customer_id, "amount": commitment.amount, "promised_date": str(commitment.promised_date)})

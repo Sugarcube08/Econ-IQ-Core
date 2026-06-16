@@ -24,7 +24,7 @@ class RecommendationRulesEngine:
         """
         Calculates credit recommendations based on customer score thresholds and saves them.
         """
-        logger.info(f"Evaluating credit policies for customer {customer_id}")
+        logger.debug("BUSINESS | Evaluating credit policies", extra={"customer_id": customer_id})
         
         # 1. Fetch relevant customer intelligence scores
         stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
@@ -32,7 +32,7 @@ class RecommendationRulesEngine:
         intel = res.scalars().first()
 
         if not intel:
-            logger.warning(f"No customer intelligence found for {customer_id} during credit policy evaluation.")
+            logger.warning("BUSINESS | No customer intelligence found during credit policy evaluation", extra={"customer_id": customer_id})
             return CustomerRecommendations(customer_id=customer_id, generated_date=datetime.now(UTC).date(), recommendations=[])
 
         # 2. Clear existing ACTIVE recommendations for this customer

@@ -16,12 +16,27 @@ from core.recommendation.rules_engine import RecommendationRulesEngine
 from core.services.alert_service import AlertService
 from core.services.collections_service import CollectionsService
 from core.services.decision_audit_service import DecisionAuditService
-from core.storage.postgres import AsyncSessionLocal
+from core.storage.postgres import AsyncSessionLocal, engine
 
 
 async def run_verification():
     print("--- STARTING SPRINT VERIFICATION RUN ---")
     start_time = time.time()
+    
+    # Run strict schema validation (Zero mutations, verification only)
+    async with engine.connect() as conn:
+        def validate_schema(sync_conn):
+            from sqlalchemy import inspect
+            inspector = inspect(sync_conn)
+            cols = [c["name"] for c in inspector.get_columns("customer_intelligence")]
+            required = ["current_state", "customer_archetype", "risk_direction", "trust_direction"]
+            missing = [r for r in required if r not in cols]
+            if missing:
+                raise RuntimeError(
+                    f"Database schema misalignment: missing columns in 'customer_intelligence': {missing}. "
+                    "Please run Alembic migrations ('alembic upgrade head') before starting verification."
+                )
+        await conn.run_sync(validate_schema)
     
     async with AsyncSessionLocal() as session:
         # Clean up existing test data

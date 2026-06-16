@@ -1,13 +1,10 @@
-import logging
-
+from loguru import logger
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.core.responses import error_response
 from core.schemas.responses import ErrorDetail
-
-logger = logging.getLogger(__name__)
 
 
 def get_error_code(status_code: int) -> str:
@@ -57,7 +54,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled exception: {exc}")
+    logger.exception("FAILURE | Unhandled exception", extra={"error": str(exc)})
     errors = [ErrorDetail(code="INTERNAL_SERVER_ERROR", message="An unexpected error occurred.")]
     return error_response(
         message="Internal server error",

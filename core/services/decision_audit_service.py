@@ -37,7 +37,7 @@ class DecisionAuditService:
                     rec.status = "OVERRIDDEN"
                 elif action_taken == "REJECTED":
                     rec.status = "RESOLVED"
-                logger.info(f"Updated recommendation {recommendation_id} status to {rec.status}")
+                logger.info("BUSINESS | Updated recommendation status", extra={"recommendation_id": recommendation_id, "new_status": rec.status})
 
         audit = DecisionAudit(
             id=str(uuid.uuid4()),
@@ -50,7 +50,7 @@ class DecisionAuditService:
         )
         db_session.add(audit)
         await db_session.flush()
-        logger.info(f"Decision action logged for customer {customer_id}: {action_taken}")
+        logger.info("BUSINESS | Credit Decision logged", extra={"customer_id": customer_id, "action_taken": action_taken, "performed_by": performed_by})
         return audit
 
     async def get_history(

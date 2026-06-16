@@ -24,7 +24,7 @@ class EmailService:
         log_ctx = f"[Correlation: {correlation_id}] " if correlation_id else ""
         
         if not settings.SMTP_HOST:
-            logger.warning(f"{log_ctx}SMTP_HOST not configured. Skipping email to {to_email}")
+            logger.warning("FAILURE | SMTP_HOST not configured. Skipping email send", extra={"correlation_id": correlation_id})
             return False
 
         message = MIMEMultipart("alternative")
@@ -66,15 +66,15 @@ class EmailService:
                     
                     await smtp_client.send_message(message)
                 
-                logger.info(f"{log_ctx}Successfully sent email to {to_email} (Attempt {attempt + 1})")
+                logger.info("SYSTEM | Email sent successfully", extra={"correlation_id": correlation_id, "attempt": attempt + 1})
                 return True
 
             except (TimeoutError, aiosmtplib.SMTPException, OSError) as e:
-                logger.warning(f"{log_ctx}Failed to send email to {to_email} (Attempt {attempt + 1}): {e}")
+                logger.warning("FAILURE | Failed to send email", extra={"correlation_id": correlation_id, "attempt": attempt + 1, "error": str(e)})
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay * (attempt + 1))
                 else:
-                    logger.error(f"{log_ctx}Exhausted retries for email to {to_email}")
+                    logger.error("FAILURE | Exhausted retries for email", extra={"correlation_id": correlation_id})
         
         return False
 

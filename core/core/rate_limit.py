@@ -76,13 +76,19 @@ class RateLimiter:
             
             if not is_allowed:
                 logger.warning(
-                    f"Rate limit triggered: {limit_name} for {resource_id} "
-                    f"({current_count}/{max_requests} in {window_seconds}s)"
+                    "SECURITY | Rate limit triggered",
+                    extra={
+                        "limit_name": limit_name,
+                        "resource_id": resource_id,
+                        "current_count": current_count,
+                        "max_requests": max_requests,
+                        "window_seconds": window_seconds
+                    }
                 )
             
             return is_allowed, current_count
         except Exception as e:
-            logger.error(f"Error executing rate limit script for {key}: {e}")
+            logger.error("FAILURE | Error executing rate limit script", extra={"key": key, "error": str(e)})
             # Fail closed for security
             return False, -1
 

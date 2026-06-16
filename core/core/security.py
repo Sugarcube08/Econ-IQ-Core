@@ -66,10 +66,14 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     })
     
     # DIAGNOSTIC LOGGING
-    logger.info(
-        f"DEBUG [JWT SIGN]: alg={settings.JWT_ALGORITHM} | "
-        f"iss={settings.JWT_ISSUER} | aud={settings.JWT_AUDIENCE} | "
-        f"priv_hash={_get_key_hash(settings.JWT_PRIVATE_KEY)}"
+    logger.debug(
+        "SECURITY | JWT sign details",
+        extra={
+            "alg": settings.JWT_ALGORITHM,
+            "iss": settings.JWT_ISSUER,
+            "aud": settings.JWT_AUDIENCE,
+            "priv_hash": _get_key_hash(settings.JWT_PRIVATE_KEY)
+        }
     )
 
     encoded_jwt = jwt.encode(
@@ -86,10 +90,14 @@ def decode_access_token(token: str) -> dict[str, Any]:
     Enforces strict audience and issuer validation.
     """
     # DIAGNOSTIC LOGGING
-    logger.info(
-        f"DEBUG [JWT VERIFY]: alg={settings.JWT_ALGORITHM} | "
-        f"iss={settings.JWT_ISSUER} | aud={settings.JWT_AUDIENCE} | "
-        f"pub_hash={_get_key_hash(settings.JWT_PUBLIC_KEY)}"
+    logger.debug(
+        "SECURITY | JWT verify details",
+        extra={
+            "alg": settings.JWT_ALGORITHM,
+            "iss": settings.JWT_ISSUER,
+            "aud": settings.JWT_AUDIENCE,
+            "pub_hash": _get_key_hash(settings.JWT_PUBLIC_KEY)
+        }
     )
 
     try:
@@ -107,7 +115,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
         )
         return payload
     except jwt.PyJWTError as e:
-        logger.warning(f"JWT validation failed: {e}")
+        logger.warning("SECURITY | JWT validation failed", extra={"error": str(e)})
         raise
 
 

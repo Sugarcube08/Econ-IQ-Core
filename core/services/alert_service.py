@@ -90,11 +90,11 @@ class AlertService:
         generated = []
 
         def map_state_label(s: str | None) -> str:
-            if s == "declining":
+            if s in ("declining", "stressed", "distressed", "liquidity_stress"):
                 return "liquidity_stress"
-            if s == "inactive":
+            if s in ("inactive", "contract", "dormant"):
                 return "contract"
-            if s == "irregular":
+            if s in ("irregular", "monitor", "overleveraged"):
                 return "monitor"
             return "healthy"
 

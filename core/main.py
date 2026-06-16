@@ -32,17 +32,17 @@ async def start_sync_worker():
     """
     Main background loop that periodically checks and runs the event sync pipeline.
     """
-    logger.info("Starting background event sync worker...")
+    logger.info("SYSTEM | Starting background event sync worker")
     sync_pipeline = SyncPipeline()
     while True:
         try:
-            logger.debug("Running background event sync cycle...")
+            logger.debug("PROCESSING | Running background event sync cycle")
             await sync_pipeline.run_cycle()
         except asyncio.CancelledError:
-            logger.info("Background sync worker cancelled.")
+            logger.info("SYSTEM | Background sync worker cancelled")
             break
         except Exception as e:
-            logger.error(f"Unhandled error in background sync worker: {e}")
+            logger.error("FAILURE | Unhandled error in background sync worker", extra={"error": str(e)})
         await asyncio.sleep(10)
 
 
@@ -50,7 +50,7 @@ async def start_sync_worker():
 async def lifespan(app: FastAPI):
     # 1. Startup Logic
     setup_logging()
-    logger.info("Initializing econiq Hardened Backend...")
+    logger.info("SYSTEM | Initializing econiq Hardened Backend")
 
     # Strict Production Validation
     settings.validate_production()
@@ -62,25 +62,41 @@ async def lifespan(app: FastAPI):
     # Initialize Persistence
     if not settings.SKIP_SCHEMA_VERIFICATION:
         async with engine.begin() as conn:
-            logger.info("Verifying database schema...")
+            logger.info("SYSTEM | Verifying database schema")
             try:
                 await conn.run_sync(Base.metadata.create_all)
             except Exception as e:
                 if "already exists" in str(e):
-                    logger.warning(f"Database schema verification race condition handled: {e}")
+                    logger.warning("SYSTEM | Database schema verification race condition handled", extra={"error": str(e)})
                 else:
                     raise
-            logger.info("Database schema verified.")
+            logger.info("SYSTEM | Database schema verified")
+
+        # Run strict schema validation (Zero mutations, verification only)
+        async with engine.connect() as conn:
+            def validate_schema(sync_conn):
+                from sqlalchemy import inspect
+                inspector = inspect(sync_conn)
+                cols = [c["name"] for c in inspector.get_columns("customer_intelligence")]
+                required = ["current_state", "customer_archetype", "risk_direction", "trust_direction"]
+                missing = [r for r in required if r not in cols]
+                if missing:
+                    raise RuntimeError(
+                        f"Database schema misalignment: missing columns in 'customer_intelligence': {missing}. "
+                        "Please run Alembic migrations ('alembic upgrade head') before starting the application."
+                    )
+            await conn.run_sync(validate_schema)
+            logger.info("SYSTEM | Database schema alignment validated successfully")
 
         async with AsyncSessionLocal() as session:
             await sync_pipeline.upgrade_raw_tables_schema(session)
     else:
-        logger.info("Skipping database schema verification (SKIP_SCHEMA_VERIFICATION=True).")
+        logger.info("SYSTEM | Skipping database schema verification (SKIP_SCHEMA_VERIFICATION=True)")
 
     # Connect to Redis (Fail-Closed)
     await redis_manager.connect()
 
-    logger.info("econiq Backend Operational.")
+    logger.info("SYSTEM | econiq Backend Operational")
 
     # Start lightweight background processing tasks
     app.state.sync_task = asyncio.create_task(start_sync_worker())
@@ -90,7 +106,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown Logic
-    logger.info("Shutting down econiq Backend...")
+    logger.info("SYSTEM | Shutting down econiq Backend")
     if hasattr(app.state, "sync_task"):
         app.state.sync_task.cancel()
         try:
@@ -105,7 +121,7 @@ async def lifespan(app: FastAPI):
             pass
     await redis_manager.disconnect()
     await engine.dispose()
-    logger.info("Shutdown complete.")
+    logger.info("SYSTEM | Shutdown complete")
 
 
 app = FastAPI(

@@ -288,13 +288,16 @@ class IntelligenceOrchestrator:
         Autonomous recomputation loop for a set of customers.
         Computes Current (365d) and Previous (730d-365d) windows and persists to cache.
         """
-        logger.debug(f"Starting Autonomous Intelligence Recomputation for {len(customer_ids)} customers (Window: 365d)")
+        logger.debug("PROCESSING | Starting Autonomous Intelligence Recomputation", extra={"customers_count": len(customer_ids)})
+        start_time = datetime.now(UTC)
+        failures_count = 0
+        warnings_count = 0
 
         async with AsyncSessionLocal() as session:
             # 1. Load FULL history for all affected customers
             runtime_df = await self.ledger_context.load_customer_history(session, customer_ids)
             if runtime_df.is_empty():
-                logger.debug("No historical events found for requested customers.")
+                logger.debug("PROCESSING | No historical events found for requested customers.")
                 return
 
             repo = IntelligenceRepository(session)
@@ -323,9 +326,8 @@ class IntelligenceOrchestrator:
             curr_bulk_sales = await repo.get_bulk_total_sales_in_window(current_start, current_end, customer_ids)
             prev_bulk_sales = await repo.get_bulk_total_sales_in_window(prev_start, prev_end, customer_ids)
 
-            # Bulk customer basic details
-            names_map = {}
-            cities_map = {}
+            # Bulk customer details
+            customer_details_map = {}
             try:
                 import uuid
 
@@ -345,31 +347,65 @@ class IntelligenceOrchestrator:
                         stmt = select(
                             customers_tbl.c.id,
                             customers_tbl.c.business_name,
-                            customers_tbl.c.city
+                            customers_tbl.c.city,
+                            customers_tbl.c.business_type,
+                            customers_tbl.c.credit_limit,
+                            customers_tbl.c.behavioral_profile
                         ).where(
                             customers_tbl.c.id.in_(uuid_cids)
                         )
                         
                         res = await session.execute(stmt)
                         for row in res.all():
-                            names_map[str(row.id)] = row.business_name
-                            cities_map[str(row.id)] = row.city
+                            customer_details_map[str(row.id)] = {
+                                "business_name": row.business_name,
+                                "city": row.city,
+                                "business_type": row.business_type,
+                                "credit_limit": float(row.credit_limit) if row.credit_limit is not None else 0.0,
+                                "behavioral_profile": row.behavioral_profile or {}
+                            }
             except Exception as e:
-                logger.warning(f"Could not load customer names and cities in bulk: {e}")
+                logger.warning("FAILURE | Could not load customer details in bulk", extra={"error": str(e)})
 
             # 4. Process each customer
+            from core.models.state_models import EventLedger
+            import uuid as uuid_pkg
+
             for cid in customer_ids:
                 try:
                     async with session.begin_nested():
                         cust_df = runtime_df.filter(pl.col("customer_id") == cid)
+                        cust_details = customer_details_map.get(cid, {})
+                        customer_name = cust_details.get("business_name")
+                        city_name = cust_details.get("city")
+                        business_type = cust_details.get("business_type")
+                        credit_limit = cust_details.get("credit_limit", 0.0)
+                        behavioral_profile = cust_details.get("behavioral_profile") or {}
+
+                        # Derive archetype
+                        if business_type in ("manufacturer", "distributor") or (business_type == "wholesaler" and credit_limit > 500000.0):
+                            archetype_val = "whale"
+                        else:
+                            params = behavioral_profile.get("params", {})
+                            gp = params.get("growth_potential", 5)
+                            cp = params.get("churn_probability", 0.5)
+                            liq = params.get("liquidity", 5)
+                            if gp >= 15:
+                                archetype_val = "growing_retailer"
+                            elif cp >= 0.7:
+                                archetype_val = "declining_retailer"
+                            elif liq <= 3:
+                                archetype_val = "liquidity_stressed"
+                            else:
+                                archetype_val = "stable_retailer"
                         
                         if cust_df.is_empty():
                             # Handle Zero-History Customer (inactive initialization)
-                            logger.debug(f"Initializing inactive state for zero-history customer {cid}")
+                            logger.debug("PROCESSING | Initializing inactive state for zero-history customer", extra={"customer_id": cid})
                             intel_data = {
                                 "customer_id": cid,
-                                "customer_name": names_map.get(cid),
-                                "city": cities_map.get(cid),
+                                "customer_name": customer_name,
+                                "city": city_name,
                                 "health_score": 0.0,
                                 "risk_score": 0.0,
                                 "growth_score": 0.0,
@@ -380,7 +416,11 @@ class IntelligenceOrchestrator:
                                 "relationship_score": 0.0,
                                 "contribution_current": 0.0,
                                 "outstanding_current": 0.0,
-                                "state": "inactive",
+                                "state": "dormant",
+                                "current_state": "dormant",
+                                "customer_archetype": archetype_val,
+                                "risk_direction": "stable",
+                                "trust_direction": "stable",
                                 "health_previous": 0.0,
                                 "risk_previous": 0.0,
                                 "growth_previous": 0.0,
@@ -433,41 +473,183 @@ class IntelligenceOrchestrator:
                             if isinstance(last_purchase_date, datetime):
                                 last_purchase_date = last_purchase_date.date()
 
+                        # Derive directions
+                        curr_trust = curr_row.get("trust_score") or 0.0
+                        prev_trust = prev_row.get("trust_score") or 0.0
+                        curr_risk = curr_row.get("risk_score") or 0.0
+                        prev_risk = prev_row.get("risk_score") or 0.0
+                        curr_health = curr_row.get("health_score") or 0.0
+                        prev_health = prev_row.get("health_score") or 0.0
+                        curr_coll = curr_row.get("collection_score") or 0.0
+                        prev_coll = prev_row.get("collection_score") or 0.0
+                        
+                        dim_credit = curr_row.get("dim_credit") or 0.5
+                        dim_discipline = curr_row.get("dim_discipline") or 0.5
+                        behavioral_state = curr_row.get("behavioral_state")
+                        trajectory = curr_row.get("trajectory")
+
+                        if curr_trust > prev_trust + 0.05:
+                            trust_dir = "increasing"
+                        elif curr_trust < prev_trust - 0.05:
+                            trust_dir = "decreasing"
+                        else:
+                            trust_dir = "stable"
+
+                        if curr_risk > prev_risk + 0.05:
+                            risk_dir = "increasing"
+                        elif curr_risk < prev_risk - 0.05:
+                            risk_dir = "decreasing"
+                        else:
+                            risk_dir = "stable"
+
+                        # Trust score refinement (directional influence)
+                        trust_score = curr_trust
+                        if trust_dir == "decreasing":
+                            trust_score = max(0.0, curr_trust - 0.05)
+                        elif trust_dir == "increasing":
+                            trust_score = min(1.0, curr_trust + 0.05)
+
+                        # State Inference
+                        if behavioral_state == "inactive":
+                            state_val = "dormant"
+                        elif curr_risk >= 0.70 or dim_discipline < 0.25:
+                            state_val = "distressed"
+                        elif curr_risk >= 0.50 or dim_discipline < 0.45:
+                            state_val = "stressed"
+                        elif dim_credit < 0.35:
+                            state_val = "overleveraged"
+                        elif trajectory in ("COLLAPSING", "DECLINING") or behavioral_state == "declining":
+                            state_val = "declining"
+                        elif curr_risk < prev_risk - 0.05 and dim_discipline >= 0.5:
+                            state_val = "recovering"
+                        elif trajectory == "ACCELERATING":
+                            state_val = "expanding"
+                        elif trajectory == "GROWING":
+                            state_val = "growing"
+                        else:
+                            state_val = "healthy"
+
+                        # Fetch existing state for transition timeline triggers
+                        existing_intel = await repo.get_latest_customer_state(cid)
+                        prev_state_name = existing_intel.state if existing_intel else None
+                        prev_trust_val = existing_intel.trust_score if existing_intel else None
+
+                        event_date_to_use = current_end.date()
+                        
+                        # Helper to check if event already exists
+                        async def event_exists(evt_type: str) -> bool:
+                            check_stmt = select(EventLedger.event_id).where(
+                                EventLedger.customer_id == cid,
+                                EventLedger.event_type == evt_type,
+                                EventLedger.event_date == event_date_to_use
+                            ).limit(1)
+                            check_res = await session.execute(check_stmt)
+                            return check_res.scalar() is not None
+
+                        events_to_add = []
+                        if prev_state_name and prev_state_name != state_val:
+                            # State change event
+                            if state_val in ("stressed", "distressed") and prev_state_name not in ("stressed", "distressed"):
+                                if not await event_exists("financial_stress_detected"):
+                                    events_to_add.append(EventLedger(
+                                        event_id=f"EVT_STRESS_{cid}_{event_date_to_use.isoformat()}_{str(uuid_pkg.uuid4())[:8]}",
+                                        customer_id=cid,
+                                        event_type="financial_stress_detected",
+                                        event_date=event_date_to_use,
+                                        amount=0.0,
+                                        is_ok=1,
+                                        metadata_={"description": f"Customer entered {state_val.capitalize()} State", "from_state": prev_state_name, "to_state": state_val}
+                                    ))
+                            elif state_val in ("declining", "dormant") and prev_state_name not in ("declining", "dormant"):
+                                if not await event_exists("churn_risk_detected"):
+                                    events_to_add.append(EventLedger(
+                                        event_id=f"EVT_CHURN_{cid}_{event_date_to_use.isoformat()}_{str(uuid_pkg.uuid4())[:8]}",
+                                        customer_id=cid,
+                                        event_type="churn_risk_detected",
+                                        event_date=event_date_to_use,
+                                        amount=0.0,
+                                        is_ok=1,
+                                        metadata_={"description": "Churn Risk Detected: purchase intervals or active states declining", "from_state": prev_state_name, "to_state": state_val}
+                                    ))
+                            elif state_val in ("healthy", "recovering", "growing", "expanding") and prev_state_name in ("stressed", "distressed", "declining"):
+                                if not await event_exists("risk_recovery"):
+                                    events_to_add.append(EventLedger(
+                                        event_id=f"EVT_RECOVERY_{cid}_{event_date_to_use.isoformat()}_{str(uuid_pkg.uuid4())[:8]}",
+                                        customer_id=cid,
+                                        event_type="risk_recovery",
+                                        event_date=event_date_to_use,
+                                        amount=0.0,
+                                        is_ok=1,
+                                        metadata_={"description": f"Recovery Detected: customer transitioned to {state_val.capitalize()} state", "from_state": prev_state_name, "to_state": state_val}
+                                    ))
+
+                        if prev_trust_val and abs(trust_score - prev_trust_val) >= 0.10:
+                            evt_type = "purchase_pacing_shifted" if trust_score < prev_trust_val else "trust_improved"
+                            if not await event_exists(evt_type):
+                                events_to_add.append(EventLedger(
+                                    event_id=f"EVT_TRUST_{cid}_{evt_type}_{event_date_to_use.isoformat()}_{str(uuid_pkg.uuid4())[:8]}",
+                                    customer_id=cid,
+                                    event_type=evt_type,
+                                    event_date=event_date_to_use,
+                                    amount=0.0,
+                                    is_ok=1,
+                                    metadata_={"description": f"Trust Score changed by {int((trust_score - prev_trust_val)*100)}%", "old_value": prev_trust_val, "new_value": trust_score}
+                                ))
+
+                        if prev_coll and curr_coll < prev_coll - 0.10:
+                            if not await event_exists("stress_delay_accumulated"):
+                                events_to_add.append(EventLedger(
+                                    event_id=f"EVT_DELAY_{cid}_{event_date_to_use.isoformat()}_{str(uuid_pkg.uuid4())[:8]}",
+                                    customer_id=cid,
+                                    event_type="stress_delay_accumulated",
+                                    event_date=event_date_to_use,
+                                    amount=0.0,
+                                    is_ok=1,
+                                    metadata_={"description": f"Payment Delay worsened: collection score dropped by {int((prev_coll - curr_coll)*100)}%", "old_value": prev_coll, "new_value": curr_coll}
+                                ))
+
+                        for evt in events_to_add:
+                            session.add(evt)
+
                         # 5. Populate Consolidated Intelligence Data (Cache)
                         intel_data = {
                             "customer_id": cid,
-                            "customer_name": names_map.get(cid),
-                            "city": cities_map.get(cid),
-                            "health_score": curr_row.get("health_score"),
-                            "risk_score": curr_row.get("risk_score"),
+                            "customer_name": customer_name,
+                            "city": city_name,
+                            "health_score": curr_health,
+                            "risk_score": curr_risk,
                             "growth_score": curr_row.get("growth_score"),
-                            "trust_score": curr_row.get("trust_score"),
+                            "trust_score": trust_score,
                             "opportunity_score": curr_row.get("opportunity_score"),
                             "credit_score": curr_row.get("credit_score"),
-                            "collection_score": curr_row.get("collection_score"),
+                            "collection_score": curr_coll,
                             "relationship_score": curr_row.get("relationship_score"),
                             "contribution_current": curr_contrib,
                             "outstanding_current": curr_outstanding,
-                            "state": curr_row.get("behavioral_state"),
-                            "health_previous": prev_row.get("health_score"),
-                            "risk_previous": prev_row.get("risk_score"),
+                            "state": state_val,
+                            "current_state": state_val,
+                            "customer_archetype": archetype_val,
+                            "risk_direction": risk_dir,
+                            "trust_direction": trust_dir,
+                            "health_previous": prev_health,
+                            "risk_previous": prev_risk,
                             "growth_previous": prev_row.get("growth_score"),
-                            "trust_previous": prev_row.get("trust_score"),
+                            "trust_previous": prev_trust,
                             "opportunity_previous": prev_row.get("opportunity_score"),
                             "credit_previous": prev_row.get("credit_score"),
-                            "collection_previous": prev_row.get("collection_score"),
+                            "collection_previous": prev_coll,
                             "relationship_previous": prev_row.get("relationship_score"),
                             "contribution_previous": prev_contrib,
                             "outstanding_previous": prev_outstanding,
                             "last_purchase_date": last_purchase_date,
                             "v2_scores": {
-                                "health_score": curr_row.get("health_score", 0.0),
-                                "risk_score": curr_row.get("risk_score", 0.0),
+                                "health_score": curr_health,
+                                "risk_score": curr_risk,
                                 "growth_score": curr_row.get("growth_score", 0.0),
-                                "trust_score": curr_row.get("trust_score", 0.0),
+                                "trust_score": trust_score,
                                 "opportunity_score": curr_row.get("opportunity_score", 0.0),
                                 "credit_score": curr_row.get("credit_score", 0.0),
-                                "collection_score": curr_row.get("collection_score", 0.0),
+                                "collection_score": curr_coll,
                                 "relationship_score": curr_row.get("relationship_score", 0.0),
                                 "dimensions": {
                                     "activity": curr_row.get("dim_activity", 0.0),
@@ -489,34 +671,46 @@ class IntelligenceOrchestrator:
                             from core.services.alert_service import AlertService
                             await AlertService().scan_and_generate_alerts(cid, session)
                         except Exception as e_alert:
-                            logger.error(f"Failed to generate alerts for customer {cid}: {e_alert}")
+                            warnings_count += 1
+                            logger.debug("PROCESSING | Failed to generate alerts for customer", extra={"customer_id": cid, "error": str(e_alert)})
 
                         try:
                             from core.recommendation.service import RecommendationService
                             await RecommendationService().generate_recommendations(session, cid)
                         except Exception as e_rec:
-                            logger.error(f"Failed to generate recommendations for customer {cid}: {e_rec}")
+                            warnings_count += 1
+                            logger.debug("PROCESSING | Failed to generate recommendations for customer", extra={"customer_id": cid, "error": str(e_rec)})
 
                         try:
                             from core.services.collections_service import CollectionsService
                             await CollectionsService().evaluate_commitments(cid, session)
                         except Exception as e_comm:
-                            logger.error(f"Failed to evaluate commitments for customer {cid}: {e_comm}")
+                            warnings_count += 1
+                            logger.debug("PROCESSING | Failed to evaluate commitments for customer", extra={"customer_id": cid, "error": str(e_comm)})
 
                 except Exception as e:
-                    logger.error(f"Failed to recompute intelligence for customer {cid}: {e}")
+                    failures_count += 1
+                    logger.debug("PROCESSING | Failed to recompute intelligence for customer", extra={"customer_id": cid, "error": str(e)})
                     continue
 
             await session.commit()
+            duration = (datetime.now(UTC) - start_time).total_seconds()
+            logger.info(
+                "PROCESSING | Intelligence Recompute Completed",
+                extra={
+                    "Customers": len(customer_ids),
+                    "Duration": f"{duration:.2f}s",
+                    "Failures": failures_count,
+                    "Warnings": warnings_count
+                }
+            )
 
     async def run_dynamic(self, customer_ids: list[str], context: AnalysisContext) -> pl.DataFrame:
         """
         Dynamically computes intelligence for the requested customers and context.
         Does NOT persist to database.
         """
-        logger.debug(
-            f"Dynamically computing intelligence for {len(customer_ids)} customers | Context: {context.window_str}"
-        )
+        logger.debug("PROCESSING | Dynamically computing intelligence", extra={"customers_count": len(customer_ids), "context": context.window_str})
 
         async with AsyncSessionLocal() as session:
             repo = IntelligenceRepository(session)
@@ -586,9 +780,7 @@ class IntelligenceOrchestrator:
         Dynamically computes the full intelligence timeline for a single customer.
         Returns the joined states and confidence dataframe for all days in the window.
         """
-        logger.debug(
-            f"Computing intelligence timeline for customer {customer_id} | Context: {context.window_str}"
-        )
+        logger.debug("PROCESSING | Computing intelligence timeline", extra={"customer_id": customer_id, "context": context.window_str})
 
         async with AsyncSessionLocal() as session:
             repo = IntelligenceRepository(session)

@@ -19,7 +19,7 @@ class DBIngestionProvider:
         is_already_missing = table_name in _missing_tables
         table = await get_reflected_table(table_name, self.session)
         if table is None and not is_already_missing:
-            logger.warning(f"External raw table '{table_name}' does not exist. Skipping.")
+            logger.warning("PROCESSING | External raw table does not exist", extra={"table_name": table_name})
         return table
 
     async def ingest_async(self) -> tuple[pl.DataFrame, dict[str, list[Any]], list[str]]:
@@ -28,7 +28,7 @@ class DBIngestionProvider:
         Reads unprocessed records (is_processed=False) from external raw tables.
         Returns (DataFrame, processed_ids_map, metadata_customer_ids)
         """
-        logger.debug(f"Extracting up to {self.fetch_limit} unprocessed records from external tables")
+        logger.debug("PROCESSING | Extracting unprocessed records from external tables", extra={"fetch_limit": self.fetch_limit})
 
         source_configs = [
             ("raw_sales", self._normalize_sales),
@@ -59,7 +59,7 @@ class DBIngestionProvider:
 
                 dicts = [dict(row._mapping) for row in rows]
                 raw_df = pl.DataFrame(dicts, infer_schema_length=None)
-                logger.debug(f"Fetched {raw_df.height} rows from {table_name}")
+                logger.debug("PROCESSING | Fetched rows from external table", extra={"table_name": table_name, "rows": raw_df.height})
 
                 processed_ids[table_name] = raw_df["id"].to_list()
 
@@ -76,9 +76,9 @@ class DBIngestionProvider:
 
                 norm_df = normalizer(raw_df)
                 if norm_df.is_empty():
-                    logger.warning(f"Normalization for {table_name} produced an empty DataFrame")
+                    logger.warning("PROCESSING | External table normalization produced empty DataFrame", extra={"table_name": table_name})
                 else:
-                    logger.debug(f"Normalized {table_name} into {norm_df.height} rows")
+                    logger.debug("PROCESSING | Normalized external table rows", extra={"table_name": table_name, "rows": norm_df.height})
                     all_normalized.append(norm_df)
                     remaining_limit -= raw_df.height
 
@@ -265,4 +265,4 @@ class DBIngestionProvider:
                     await self.session.execute(stmt)
 
         await self.session.commit()
-        logger.debug(f"Directly marked records as processed in raw tables for batch {batch_id}")
+        logger.debug("PROCESSING | Marked raw table records as processed", extra={"batch_id": batch_id})

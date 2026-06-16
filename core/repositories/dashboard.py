@@ -421,11 +421,11 @@ class DashboardRepository:
         }
 
         for _cid, b_state in rows:
-            if b_state == "declining":
+            if b_state in ("declining", "stressed", "distressed", "liquidity_stress"):
                 segment = "LIQUIDITY_STRESS"
-            elif b_state == "inactive":
+            elif b_state in ("inactive", "contract", "dormant"):
                 segment = "CONTRACT"
-            elif b_state == "irregular":
+            elif b_state in ("irregular", "monitor", "overleveraged"):
                 segment = "MONITOR"
             else:
                 segment = "HEALTHY"
