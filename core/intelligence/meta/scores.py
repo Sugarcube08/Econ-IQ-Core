@@ -23,7 +23,6 @@ class MetaScoreEngine:
         if dimensions_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Meta Scores from B2B Dimensions")
 
         df = dimensions_df.select(
             [

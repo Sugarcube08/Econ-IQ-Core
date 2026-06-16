@@ -1,6 +1,6 @@
-from loguru import logger
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
+from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.core.responses import error_response

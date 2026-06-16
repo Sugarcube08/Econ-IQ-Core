@@ -35,7 +35,6 @@ class SettlementMatchingEngine:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing FIFO settlement matching")
 
         # 1. Separate Bills (SALES) and Credits (PAYMENTS + RETURNS)
         events = (

@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from loguru import logger
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,7 @@ class AlertRepository:
             created_at=datetime.now(UTC)
         )
         self.db.add(alert)
+        logger.info("BUSINESS | Alert Created", extra={"customer_id": customer_id, "alert_type": alert_type, "alert_severity": alert_severity})
         return alert
 
     async def get_alerts(
@@ -88,4 +90,5 @@ class AlertRepository:
             alert.status = "ACKNOWLEDGED"
             alert.acknowledged_at = datetime.now(UTC)
             alert.acknowledged_by = user_id
+            logger.info("BUSINESS | Alert Resolved", extra={"customer_id": alert.customer_id, "alert_id": alert.id, "acknowledged_by": user_id})
         return alert

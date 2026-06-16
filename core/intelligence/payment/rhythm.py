@@ -19,7 +19,6 @@ class PaymentRhythmEngine:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing payment rhythm and fragmentation")
 
         # 1. Count Events per Customer
         counts = ledger_df.group_by("customer_id").agg(

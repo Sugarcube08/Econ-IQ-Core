@@ -12,7 +12,6 @@ class DisciplineDimensionEngine:
         if settlement_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 2: Financial Discipline")
 
         df = settlement_df.select(["customer_id", "avg_repayment_days", "date"])
 

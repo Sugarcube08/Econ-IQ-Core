@@ -1,6 +1,7 @@
 import time
 
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 
 from core.config.settings import settings
 from core.storage.redis import redis_manager
@@ -86,9 +87,10 @@ class RateLimiter:
                     }
                 )
             
+            FailureRegistry.recover("RATE_LIMIT_ERROR")
             return is_allowed, current_count
         except Exception as e:
-            logger.error("FAILURE | Error executing rate limit script", extra={"key": key, "error": str(e)})
+            FailureRegistry.record("RATE_LIMIT_ERROR", f"Error executing rate limit script for {key}: {e}", "ERROR", extra={"key": key, "error": str(e)})
             # Fail closed for security
             return False, -1
 

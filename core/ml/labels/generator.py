@@ -14,7 +14,6 @@ class MLLabelGenerator:
         Generates binary labels for churn: 1 if customer has no purchase events
         within lead_window_days after the observation_date, 0 otherwise.
         """
-        logger.info(f"Generating churn labels observation_date={observation_date} | lead_window={lead_window_days}d")
         if ledger_df.is_empty():
             return pl.DataFrame(schema={"customer_id": pl.Utf8, "label_churn": pl.Int64})
 
@@ -48,7 +47,6 @@ class MLLabelGenerator:
         Generates default labels: 1 if customer records days past due (DPD) exceeding threshold
         within lead_window_days after the observation_date, 0 otherwise.
         """
-        logger.info(f"Generating default labels observation_date={observation_date} | dpd_threshold={dpd_threshold}")
         if ledger_df.is_empty():
             return pl.DataFrame(schema={"customer_id": pl.Utf8, "label_default": pl.Int64})
 

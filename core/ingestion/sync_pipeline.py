@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import polars as pl
 from loguru import logger
-from sqlalchemy import func, select, text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config.settings import settings
@@ -16,6 +16,7 @@ from core.models.state_models import (
     SyncBatch,
 )
 from core.storage.postgres import AsyncSessionLocal
+from core.observability.failure_registry import FailureRegistry
 
 
 class SyncPipeline:
@@ -28,7 +29,7 @@ class SyncPipeline:
     async def upgrade_raw_tables_schema(self, session: AsyncSession):
         """DDL migration to ensure external raw tables have state-tracking columns."""
         raw_tables = ["raw_sales", "raw_payments", "raw_returns", "customers"]
-        logger.info("SYSTEM | Verifying raw tables schemas")
+        has_schema_errors = False
         
         for table in raw_tables:
             try:
@@ -43,15 +44,15 @@ class SyncPipeline:
                 
                 # Commit after each table to release locks and reset transaction timer
                 await session.commit()
-                logger.debug("SYSTEM | Schema verification completed for table", extra={"table_name": table})
             except Exception as e:
-                # We log and rollback for the specific table, but continue for others
-                logger.warning("FAILURE | Potential timeout or lock issue upgrading table", extra={"table_name": table, "error": str(e)})
+                has_schema_errors = True
+                FailureRegistry.record("SCHEMA_UPGRADE_FAILED", f"Potential timeout or lock issue upgrading table {table}: {e}", "WARNING", extra={"table_name": table, "error": str(e)})
                 await session.rollback()
                 # If it's a critical failure (like table not existing), we'll find out during sync
                 continue
         
-        logger.info("SYSTEM | Raw table schemas verification complete")
+        if not has_schema_errors:
+            FailureRegistry.recover("SCHEMA_UPGRADE_FAILED")
 
     async def run_cycle(self) -> bool:
         """
@@ -61,7 +62,6 @@ class SyncPipeline:
         async with AsyncSessionLocal() as session:
             # 1. Acquire Session-level Advisory Lock (Key: 42069)
             # Session-level lock is used to control concurrency across multiple transaction boundaries.
-            logger.debug("PROCESSING | Worker attempting to acquire PostgreSQL advisory lock", extra={"worker_id": self.worker_id})
             try:
                 lock_res = await session.execute(text("SELECT pg_try_advisory_lock(42069)"))
                 lock_acquired = bool(lock_res.scalar())
@@ -70,16 +70,15 @@ class SyncPipeline:
                 if session.in_transaction():
                     await session.commit()
             except Exception as e:
-                logger.error("FAILURE | Error checking advisory lock", extra={"error": str(e)})
+                FailureRegistry.record("ADVISORY_LOCK_FAILED", f"Error checking advisory lock: {e}", "ERROR", extra={"error": str(e)})
                 if session.in_transaction():
                     await session.rollback()
                 return False
 
             if not lock_acquired:
-                logger.debug("PROCESSING | Advisory lock (42069) is held by another sync worker. Yielding execution.")
                 return False
 
-            logger.debug("PROCESSING | Worker acquired advisory lock. Starting synchronization cycle.", extra={"worker_id": self.worker_id})
+            FailureRegistry.recover("ADVISORY_LOCK_FAILED")
             batch_id = str(uuid.uuid4())
             start_time = datetime.now(UTC)
 
@@ -95,7 +94,6 @@ class SyncPipeline:
                 "raw_returns": settings.SYNC_BATCH_SIZE
             }
             self.current_poll_multiplier = 1.0
-            logger.info("PROCESSING | Sync Pipeline started", extra={"sync_batch_size": settings.SYNC_BATCH_SIZE})
             
             # State tracking for error handling
             claimed_ids = {}
@@ -248,7 +246,6 @@ class SyncPipeline:
 
                         # 4. If nothing claimed, finish immediately
                         if total_claimed == 0:
-                            logger.debug("PROCESSING | No unprocessed records detected for batch", extra={"batch_id": batch_id})
                             # Clean up sync batch as completed with 0 rows
                             complete_stmt = (
                                 update(SyncBatch)
@@ -262,8 +259,6 @@ class SyncPipeline:
                             )
                             await session.execute(complete_stmt)
                             return False
-
-                        logger.debug("PROCESSING | Processing batch, claimed rows across raw tables", extra={"batch_id": batch_id, "total_claimed": total_claimed})
 
                         # 5. Materialize ledger events (if we have sales/payments/returns)
                         unique_customers_set = set()
@@ -309,26 +304,37 @@ class SyncPipeline:
 
                 # Commit transaction
                 duration = (datetime.now(UTC) - start_time).total_seconds()
-                sales_cnt = len(claimed_ids.get("raw_sales", []))
-                payments_cnt = len(claimed_ids.get("raw_payments", []))
-                returns_cnt = len(claimed_ids.get("raw_returns", []))
                 logger.info(
-                    "PROCESSING | Sync Completed",
+                    "sync_completed",
                     extra={
-                        "Sales": sales_cnt,
-                        "Payments": payments_cnt,
-                        "Returns": returns_cnt,
-                        "Duration": f"{duration:.2f}s",
-                        "batch_id": batch_id[:8],
-                        "customers": len(unique_customers),
-                        "worker": self.worker_id
+                        "duration_sec": duration,
+                        "rows": total_claimed,
+                        "rows_processed": total_claimed,
+                        "updated": len(unique_customers),
+                        "customers_updated": len(unique_customers),
+                        "failed": 0,
+                        "errors": 0
                     }
                 )
+                FailureRegistry.recover("SYNC_BATCH_FAILED")
                 return True
 
             except Exception as batch_error:
                 # If transaction fails, it rolls back automatically
-                logger.error("FAILURE | Error processing sync batch", extra={"batch_id": batch_id, "error": str(batch_error)})
+                FailureRegistry.record("SYNC_BATCH_FAILED", f"Error processing sync batch {batch_id}: {batch_error}", "ERROR", extra={"batch_id": batch_id, "error": str(batch_error)})
+                duration = (datetime.now(UTC) - start_time).total_seconds()
+                logger.info(
+                    "sync_completed",
+                    extra={
+                        "duration_sec": duration,
+                        "rows": total_claimed,
+                        "rows_processed": total_claimed,
+                        "updated": 0,
+                        "customers_updated": 0,
+                        "failed": total_claimed,
+                        "errors": total_claimed
+                    }
+                )
 
                 # Save failure status in a new transaction
                 try:
@@ -358,9 +364,9 @@ class SyncPipeline:
                                     )
                                 )
                                 await session.execute(update_stmt)
-                    logger.debug("PROCESSING | Successfully logged batch failure in DB.", extra={"batch_id": batch_id})
+                    FailureRegistry.recover("DB_LOG_FAILURE")
                 except Exception as log_error:
-                    logger.critical("FAILURE | Failed to log batch failure in database", extra={"error": str(log_error)})
+                    FailureRegistry.record("DB_LOG_FAILURE", f"Failed to log batch failure in database: {log_error}", "CRITICAL", extra={"error": str(log_error)})
 
                 return False
 
@@ -371,9 +377,9 @@ class SyncPipeline:
                     # End the transaction started by the unlock execute
                     if session.in_transaction():
                         await session.commit()
-                    logger.debug("PROCESSING | PostgreSQL advisory lock released.")
+                    FailureRegistry.recover("ADVISORY_UNLOCK_FAILED")
                 except Exception as unlock_error:
-                    logger.critical("FAILURE | Failed to release advisory lock", extra={"error": str(unlock_error)})
+                    FailureRegistry.record("ADVISORY_UNLOCK_FAILED", f"Failed to release advisory lock: {unlock_error}", "CRITICAL", extra={"error": str(unlock_error)})
 
 
     async def has_pending_work(self) -> bool:

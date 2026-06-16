@@ -12,7 +12,6 @@ class CreditDimensionEngine:
         if pressure_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 3: Credit Behavior")
 
         df = pressure_df.select(
             [

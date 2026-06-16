@@ -25,7 +25,6 @@ class StateEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug(f"Inferring longitudinal behavioral states for {context.window_days}d window")
 
         df = features_df.select([
             "customer_id", "date", "events_window", "sales_window", 

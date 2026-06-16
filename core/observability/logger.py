@@ -13,6 +13,7 @@ def setup_logging():
         extra_str = ""
         if extra:
             extra_str = " | " + " ".join(f"{k}={v}" for k, v in extra.items())
+            extra_str = extra_str.replace("{", "{{").replace("}", "}}")
         return f"<green>{{time:YYYY-MM-DD HH:mm:ss.SSS}}</green> | <level>{{level: <8}}</level> | <level>{{message}}{extra_str}</level>\n"
 
     # Standard output handler

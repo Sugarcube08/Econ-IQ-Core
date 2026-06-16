@@ -64,17 +64,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
         "aud": settings.JWT_AUDIENCE,
         "jti": secrets.token_urlsafe(16)
     })
-    
-    # DIAGNOSTIC LOGGING
-    logger.debug(
-        "SECURITY | JWT sign details",
-        extra={
-            "alg": settings.JWT_ALGORITHM,
-            "iss": settings.JWT_ISSUER,
-            "aud": settings.JWT_AUDIENCE,
-            "priv_hash": _get_key_hash(settings.JWT_PRIVATE_KEY)
-        }
-    )
 
     encoded_jwt = jwt.encode(
         to_encode, 
@@ -89,16 +78,6 @@ def decode_access_token(token: str) -> dict[str, Any]:
     Decodes and validates a JWT using the public EdDSA key.
     Enforces strict audience and issuer validation.
     """
-    # DIAGNOSTIC LOGGING
-    logger.debug(
-        "SECURITY | JWT verify details",
-        extra={
-            "alg": settings.JWT_ALGORITHM,
-            "iss": settings.JWT_ISSUER,
-            "aud": settings.JWT_AUDIENCE,
-            "pub_hash": _get_key_hash(settings.JWT_PUBLIC_KEY)
-        }
-    )
 
     try:
         payload = jwt.decode(

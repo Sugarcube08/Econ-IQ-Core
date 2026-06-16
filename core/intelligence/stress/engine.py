@@ -16,7 +16,6 @@ class StressEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing longitudinal stress scores")
 
         from core.policy.manager import policy_manager
         policy = policy_manager.policy.stress

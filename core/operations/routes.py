@@ -230,58 +230,6 @@ async def get_collections_commitments_endpoint(
 
 # --- RECOMMENDATIONS & DECISIONS ENDPOINTS ---
 
-@router.get("/recommendations", response_model=StandardResponse[list])
-async def get_recommendations_endpoint(
-    request: Request,
-    customer_id: str | None = Query(None, description="Filter by customer ID"),
-    status: str | None = Query("ACTIVE", description="Filter by status"),
-    db: AsyncSession = Depends(get_db),
-    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
-):
-    """
-    Retrieve system recommendations.
-    """
-    from core.models.state_models import Recommendation
-    stmt = select(Recommendation)
-    if customer_id:
-        stmt = stmt.where(Recommendation.customer_id == customer_id)
-    if status:
-        stmt = stmt.where(Recommendation.status == status)
-    stmt = stmt.order_by(Recommendation.created_at.desc())
-    res = await db.execute(stmt)
-    recs = res.scalars().all()
-    
-    recs_data = []
-    for r in recs:
-        recs_data.append({
-            "id": r.id,
-            "customer_id": r.customer_id,
-            "recommendation_type": r.recommendation_type,
-            "severity": r.severity,
-            "reason": r.reason,
-            "confidence": r.confidence,
-            "status": r.status,
-            "created_at": r.created_at.isoformat()
-        })
-    return success_response("Recommendations retrieved successfully", data=recs_data, request=request)
-
-
-@router.get("/customer/{id}/recommendations")
-async def get_customer_recommendations_endpoint_alt(
-    id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
-):
-    """
-    Retrieve active recommendations for a customer (alternate singular endpoint path).
-    """
-    try:
-        recs = await recommendation_service.generate_recommendations(db, id)
-        return success_response("Recommendations retrieved successfully", data=recs.model_dump(), request=request)
-    except Exception as e:
-        raise StarletteHTTPException(status_code=500, detail=f"Recommendation retrieval failed: {str(e)}") from e
-
 
 @router.post("/decisions/action", response_model=StandardResponse[dict])
 async def record_decision_action_endpoint(

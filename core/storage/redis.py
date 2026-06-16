@@ -2,6 +2,7 @@ from typing import Optional
 
 import redis.asyncio as redis
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 
 from core.config.settings import settings
 
@@ -27,7 +28,6 @@ class RedisManager:
         if self._client is not None:
             return
 
-        logger.info("SYSTEM | Connecting to Redis", extra={"redis_url": settings.REDIS_URL})
         try:
             self._client = redis.from_url(
                 settings.REDIS_URL,
@@ -39,8 +39,8 @@ class RedisManager:
             # Initial health check
             await self._client.ping()
             self._is_healthy = True
-            logger.info("SYSTEM | Redis Connected")
-        except Exception as e:
+            FailureRegistry.recover("REDIS_UNAVAILABLE", "Redis connection is operational")
+        except Exception:
             self._is_healthy = False
             # In strict mode, we might want to exit here, but we'll let the circuit breaker handle it
             raise
@@ -54,12 +54,11 @@ class RedisManager:
             await self._client.close()
             self._client = None
             self._is_healthy = False
-            logger.info("SYSTEM | Redis connection closed")
 
     async def ensure_operational(self):
         """Fail-closed check. Raises an exception if Redis is down."""
         if not self.is_operational():
-            logger.error("SECURITY | Security critical operation denied: Redis is unavailable (Fail-Closed)")
+            FailureRegistry.record("REDIS_UNAVAILABLE", "Security critical operation denied: Redis is unavailable (Fail-Closed)", "ERROR")
             from fastapi import HTTPException, status
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

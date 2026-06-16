@@ -27,8 +27,6 @@ class LedgerContextService:
 
         customer_ids = [str(cid) for cid in customer_ids]
 
-        logger.debug(f"Loading historical context for {len(customer_ids)} customers from PostgreSQL")
-
         # 1. Fetch Live Opening Balances from customers
         try:
             from core.storage.postgres import get_reflected_table
@@ -43,7 +41,6 @@ class LedgerContextService:
             else:
                 opening_balances = {}
         except Exception as e:
-            logger.debug(f"Could not fetch live opening balances for {len(customer_ids)} customers: {e}")
             opening_balances = {}
 
         # 2. Fetch history from EventLedger, excluding any stale OPENING_BALANCE events

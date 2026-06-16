@@ -23,7 +23,6 @@ class RelationshipEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Relationship Score v2 (Multi-Dimensional Fusion)")
 
         # 1. Base details from features
         df = features_df.sort("date").group_by("customer_id").tail(1)

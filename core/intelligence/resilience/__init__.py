@@ -5,6 +5,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 from prometheus_client import Counter
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -231,6 +232,7 @@ class ResilientIntelligenceOrchestrator:
                 FALLBACK_RESPONSES.labels(fallback_mode="CACHE").inc()
                 data = self._build_payload_from_cache(customer_basic, cached_intel)
                 
+                FailureRegistry.recover("CACHE_FALLBACK_FAILED")
                 return ResilientExecutionResult(
                     mode=ResilientOrchestrationMode.DEGRADED,
                     health_status=health_status,
@@ -239,7 +241,7 @@ class ResilientIntelligenceOrchestrator:
                     metadata={"fallback_source": "materialized_cache", "processing_time_ms": int((time.time() - start_time) * 1000)}
                 )
         except Exception as e:
-            logger.error(f"Failed to load cache fallback for customer {customer_id}: {e}")
+            FailureRegistry.record("CACHE_FALLBACK_FAILED", f"Failed to load cache fallback for customer {customer_id}: {e}", "ERROR", extra={"customer_id": customer_id})
 
         # Fallback to SNAPSHOT Mode (no cache, but we can return basic customer profile details)
         FALLBACK_RESPONSES.labels(fallback_mode="SNAPSHOT").inc()
@@ -269,6 +271,7 @@ class ResilientIntelligenceOrchestrator:
                 FALLBACK_RESPONSES.labels(fallback_mode="CACHE_AFTER_EXCEPTION").inc()
                 data = self._build_payload_from_cache(customer_basic, cached_intel)
                 
+                FailureRegistry.recover("CACHE_FALLBACK_FAILED")
                 return ResilientExecutionResult(
                     mode=ResilientOrchestrationMode.DEGRADED,
                     health_status=DataHealthStatus.TRANSIENT_FAILURE,
@@ -277,7 +280,7 @@ class ResilientIntelligenceOrchestrator:
                     metadata={"fallback_source": "materialized_cache_after_exception", "processing_time_ms": int((time.time() - start_time) * 1000)}
                 )
         except Exception as e:
-            logger.error(f"Failed to load cache fallback after exception for customer {customer_id}: {e}")
+            FailureRegistry.record("CACHE_FALLBACK_FAILED", f"Failed to load cache fallback after exception for customer {customer_id}: {e}", "ERROR", extra={"customer_id": customer_id})
 
         # Minimal Fallback (Goal 4 & Goal 6)
         FALLBACK_RESPONSES.labels(fallback_mode="MINIMAL_FALLBACK").inc()

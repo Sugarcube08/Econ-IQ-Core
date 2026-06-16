@@ -24,7 +24,6 @@ class ExposurePressureEngine:
         if pressure_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing deterministic outstanding/clearance intelligence")
 
         # 1. Join required components
         df = pressure_df.select(
@@ -151,7 +150,6 @@ class ExposurePressureEngine:
         if exposure_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug(f"Computing debt pressure intelligence for {context.window_days}d window")
 
         # 1. Aggregate Exposure & Persistence Metrics
         agg_df = exposure_df.group_by("customer_id").agg(

@@ -12,7 +12,6 @@ class ProductDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 5: Product Behavior")
 
         df = features_df.select(
             [

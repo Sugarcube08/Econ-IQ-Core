@@ -24,7 +24,6 @@ class RuntimeStateManager:
 
     @current_stage.setter
     def current_stage(self, val: str):
-        logger.debug(f"Runtime State Stage Update: {self._current_stage} -> {val}")
         self._current_stage = val
 
     @property
@@ -33,7 +32,6 @@ class RuntimeStateManager:
 
     @active_worker.setter
     def active_worker(self, val: str):
-        logger.debug(f"Runtime State Active Worker Update: {self._active_worker} -> {val}")
         self._active_worker = val
 
 runtime_state = RuntimeStateManager()

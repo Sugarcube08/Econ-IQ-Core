@@ -18,7 +18,6 @@ class ModelRegistry(IModelRegistry):
     def register_model(self, model_type: str, version: str, estimator: IModelEstimator) -> None:
         key = (model_type.upper(), version)
         self._models[key] = estimator
-        logger.info(f"Successfully registered model [{model_type.upper()}] version [{version}] in Registry.")
 
     def get_model(self, model_type: str, version: str | None = None) -> IModelEstimator:
         m_type = model_type.upper()
@@ -31,7 +30,6 @@ class ModelRegistry(IModelRegistry):
             # Simple sorting by version string (semantic versioning)
             matching_keys.sort(key=lambda k: [int(x) if x.isdigit() else x for x in k[1].split(".")])
             key = matching_keys[-1]
-            logger.debug(f"Resolved latest model version for [{m_type}] to version [{key[1]}].")
         else:
             key = (m_type, version)
             if key not in self._models:

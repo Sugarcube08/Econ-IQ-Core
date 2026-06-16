@@ -36,7 +36,6 @@ class CollectionsService:
         )
         db_session.add(activity)
         await db_session.flush()
-        logger.info("BUSINESS | Collection activity logged", extra={"customer_id": customer_id, "user_id": user_id, "activity_type": activity_type, "outcome": outcome})
         return activity
 
     async def get_activities(
@@ -76,7 +75,6 @@ class CollectionsService:
         )
         db_session.add(commitment)
         await db_session.flush()
-        logger.info("BUSINESS | Payment commitment logged", extra={"customer_id": customer_id, "amount": amount, "promised_date": str(promised_date)})
         return commitment
 
     async def get_commitments(
@@ -97,10 +95,11 @@ class CollectionsService:
         res = await db_session.execute(stmt)
         return list(res.scalars().all())
 
-    async def evaluate_commitments(self, customer_id: str, db_session: AsyncSession):
+    async def evaluate_commitments(self, customer_id: str, db_session: AsyncSession) -> tuple[int, int]:
         """
         Evaluates all PENDING commitments for a customer against EventLedger payments.
         Updates status to KEPT if payment amount is satisfied, or BROKEN if promised date has passed.
+        Returns a tuple of (commitments_evaluated, broken_commitments).
         """
         stmt = select(PaymentCommitment).where(
             PaymentCommitment.customer_id == customer_id,
@@ -109,10 +108,13 @@ class CollectionsService:
         res = await db_session.execute(stmt)
         pending = res.scalars().all()
         if not pending:
-            return
+            return 0, 0
 
         from core.models.state_models import EventLedger
+        evaluated = 0
+        broken = 0
         for commitment in pending:
+            evaluated += 1
             pay_stmt = select(EventLedger.amount).where(
                 EventLedger.customer_id == customer_id,
                 EventLedger.event_type == "PAYMENT",
@@ -125,7 +127,9 @@ class CollectionsService:
 
             if total_paid >= commitment.amount:
                 commitment.status = "KEPT"
-                logger.info("BUSINESS | Payment commitment KEPT", extra={"commitment_id": commitment.id, "customer_id": customer_id, "amount": commitment.amount, "total_paid": total_paid})
             elif date.today() > commitment.promised_date:
                 commitment.status = "BROKEN"
-                logger.info("BUSINESS | Payment commitment BROKEN", extra={"commitment_id": commitment.id, "customer_id": customer_id, "amount": commitment.amount, "promised_date": str(commitment.promised_date)})
+                broken += 1
+                logger.info("BUSINESS | Commitment Broken", extra={"commitment_id": commitment.id, "customer_id": customer_id, "amount": commitment.amount, "promised_date": str(commitment.promised_date)})
+
+        return evaluated, broken

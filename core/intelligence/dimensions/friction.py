@@ -12,7 +12,6 @@ class FrictionDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 6: Operational Friction")
 
         df = features_df.select(
             [

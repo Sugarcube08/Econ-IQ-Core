@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import desc, func, not_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,15 +97,15 @@ class IntelligenceRepository:
                     .values(behavioral_profile=self._sanitize_for_json(profile_payload))
                 )
                 await self.db.execute(stmt_cust)
+                FailureRegistry.recover("BEHAVIORAL_PROFILE_UPDATE_FAILED")
         except Exception as e:
-            logger.warning(f"Could not update customers.behavioral_profile for {customer_id}: {e}")
+            FailureRegistry.record("BEHAVIORAL_PROFILE_UPDATE_FAILED", f"Could not update customers.behavioral_profile for {customer_id}: {e}", "WARNING", extra={"customer_id": customer_id, "error": str(e)})
 
 
     async def get_timeline(self, customer_id: str) -> list[dict]:
         """
         Fetches the fresh event ledger from PostgreSQL.
         """
-        logger.debug(f"Serving timeline for {customer_id} from PostgreSQL")
         stmt = (
             select(
                 EventLedger.event_id,

@@ -22,7 +22,6 @@ class CadenceEngine:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing behavioral cadence")
 
         # Only care about SALES for behavioral rhythm
         sales_df = ledger_df.filter(pl.col("event_type") == "SALE").sort(["customer_id", "event_date"])

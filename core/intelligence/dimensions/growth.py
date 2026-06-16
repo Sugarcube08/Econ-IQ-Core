@@ -12,7 +12,6 @@ class GrowthDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 7: Growth Dynamics")
 
         df = features_df.select(
             [

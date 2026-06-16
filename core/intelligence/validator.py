@@ -41,7 +41,6 @@ class IntelligenceIntegrityValidator:
                 details={"message": "Empty dataframe, no activity to validate."}
             )
 
-        logger.debug("Validating intelligence integrity")
         total = intelligence_df.height
         is_valid = True
         status = DataHealthStatus.HEALTHY

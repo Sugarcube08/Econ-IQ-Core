@@ -12,7 +12,6 @@ class RelationshipDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 4: Relationship Quality")
 
         df = features_df.select(["customer_id", "date", "active_duration_days"])
 

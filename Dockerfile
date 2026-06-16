@@ -4,8 +4,9 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Enable bytecode compilation
+# Enable bytecode compilation and increase HTTP timeout to handle large packages on slower connections
 ENV UV_COMPILE_BYTECODE=1
+ENV UV_HTTP_TIMEOUT=300
 
 # Copy dependencies configuration
 COPY pyproject.toml uv.lock ./

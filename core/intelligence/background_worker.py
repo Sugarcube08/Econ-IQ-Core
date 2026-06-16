@@ -2,6 +2,7 @@ import asyncio
 import gc
 
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import String, select
 
 from core.config.settings import settings
@@ -35,10 +36,9 @@ async def find_pending_customers(session) -> list[str]:
             res = await session.execute(stmt)
             unprocessed_ids = [str(row[0]) for row in res.all()]
             if unprocessed_ids:
-                logger.debug("PROCESSING | Background worker found unprocessed customers", extra={"count": len(unprocessed_ids)})
                 return unprocessed_ids
     except Exception as e:
-        logger.warning("FAILURE | Error querying unprocessed customers", extra={"error": str(e)})
+        FailureRegistry.record("BACKGROUND_WORKER_QUERY_FAILED", f"Error querying unprocessed customers: {e}", "WARNING", extra={"error": str(e)})
 
     # 2. Stalest first: query existing records ordered by last_updated ASC
     try:
@@ -49,10 +49,9 @@ async def find_pending_customers(session) -> list[str]:
         res = await session.execute(stmt)
         stalest_ids = [str(row[0]) for row in res.all()]
         if stalest_ids:
-            logger.debug("PROCESSING | Background worker found stalest customers to refresh", extra={"count": len(stalest_ids)})
             return stalest_ids
     except Exception as e:
-        logger.warning("FAILURE | Error querying stalest customers", extra={"error": str(e)})
+        FailureRegistry.record("BACKGROUND_WORKER_QUERY_FAILED", f"Error querying stalest customers: {e}", "WARNING", extra={"error": str(e)})
 
     return []
 
@@ -74,20 +73,18 @@ async def start_background_worker():
             
             # 2. Process
             if customer_ids:
-                logger.debug("PROCESSING | Background worker starting recomputation batch", extra={"batch_size": len(customer_ids)})
                 # Orchestrator handles loading context, compute, persist, commit, and session closure
                 await orchestrator.run(customer_ids)
                 global PROCESSED_CUSTOMERS_COUNT
                 PROCESSED_CUSTOMERS_COUNT += len(customer_ids)
-                logger.debug("PROCESSING | Background worker finished recomputation batch", extra={"processed_batch": len(customer_ids), "total_processed": PROCESSED_CUSTOMERS_COUNT})
-            else:
-                logger.debug("PROCESSING | Background worker: No customers pending processing")
+                FailureRegistry.recover("BACKGROUND_WORKER_QUERY_FAILED")
+                FailureRegistry.recover("BACKGROUND_WORKER_UNHANDLED")
                 
         except asyncio.CancelledError:
             logger.info("SYSTEM | Background worker task cancelled")
             break
         except Exception as e:
-            logger.error("FAILURE | Unhandled error in background worker loop", extra={"error": str(e)})
+            FailureRegistry.record("BACKGROUND_WORKER_UNHANDLED", f"Unhandled error in background worker loop: {e}", "ERROR", extra={"error": str(e)})
             
         finally:
             # 5. Explicit cleanup of memory references

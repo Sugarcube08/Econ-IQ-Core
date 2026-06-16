@@ -1,26 +1,23 @@
-import asyncio
-from datetime import date, datetime, UTC, timedelta
-import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import select, delete
+from datetime import UTC, date, datetime, timedelta
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select
+
+from core.core.dependencies import get_current_identity
+from core.intelligence.orchestrator import IntelligenceOrchestrator
 from core.main import app
 from core.models.auth_models import User, UserRole
 from core.models.state_models import (
-    CustomerIntelligence,
     Alert,
     CollectionActivity,
+    CustomerIntelligence,
+    DecisionAudit,
+    EventLedger,
     PaymentCommitment,
     Recommendation,
-    DecisionAudit,
-    EventLedger
 )
-from core.core.permissions import Permission
-from core.core.dependencies import get_current_identity
-from core.storage.postgres import AsyncSessionLocal, engine, get_reflected_table
-from core.ingestion.sync_pipeline import SyncPipeline
-from core.intelligence.background_worker import find_pending_customers
-from core.intelligence.orchestrator import IntelligenceOrchestrator
+from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 
 TEST_CUSTOMER_ID = "99999999-9999-9999-9999-999999999999"
 

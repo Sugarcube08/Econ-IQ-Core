@@ -88,15 +88,4 @@ class HardenedSecurityMiddleware(BaseHTTPMiddleware):
             endpoint=endpoint
         ).observe(duration)
 
-        logger.info(
-            "PROCESSING | HTTP Request Completed",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "duration": f"{duration:.4f}s",
-                "correlation_id": correlation_id
-            }
-        )
-
         return response

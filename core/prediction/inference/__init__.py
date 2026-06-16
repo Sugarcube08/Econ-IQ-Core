@@ -1,5 +1,2 @@
-from core.prediction.inference.engine import InferenceEngine
+# Empty init for prediction inference subpackage
 
-__all__ = [
-    "InferenceEngine",
-]

@@ -1,7 +1,10 @@
 import asyncio
+
 import pytest
+
 from core.storage.postgres import engine
 from core.storage.redis import redis_manager
+
 
 @pytest.fixture(scope="session")
 def event_loop():

@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +29,6 @@ class MDBLockManager:
         Acquires the MDB file lock, waiting if necessary.
         Aligned with the Shared Locking Protocol.
         """
-        logger.debug(f"Attempting to acquire lock {self.lock_name} for {self.locked_by}")
         
         while True:
             # 1. Clean expired locks (Safety First)
@@ -64,7 +64,7 @@ class MDBLockManager:
                 lock = res.scalar_one_or_none()
                 
                 if lock and lock.locked_by == self.locked_by:
-                    logger.debug(f"Lock {self.lock_name} acquired successfully")
+                    FailureRegistry.recover("LOCK_ACQUIRE_FAILED")
                     # CRITICAL: End the transaction started by select() before returning
                     if self.session.in_transaction():
                         await self.session.commit()
@@ -74,17 +74,15 @@ class MDBLockManager:
                 if self.session.in_transaction():
                     await self.session.commit()
                 
-                logger.debug(f"MDB is locked by another system. Waiting {retry_interval_seconds}s...")
                 await asyncio.sleep(retry_interval_seconds)
 
             except Exception as e:
                 await self.session.rollback()
-                logger.error(f"Error while acquiring lock: {e}")
+                FailureRegistry.record("LOCK_ACQUIRE_FAILED", f"Error while acquiring lock: {e}", "ERROR")
                 await asyncio.sleep(retry_interval_seconds)
 
     async def release_lock(self):
         """Releases the lock."""
-        logger.debug(f"Releasing lock {self.lock_name} for {self.locked_by}")
         try:
             await self.session.execute(
                 delete(SyncLock).where(
@@ -93,6 +91,7 @@ class MDBLockManager:
                 )
             )
             await self.session.commit()
+            FailureRegistry.recover("LOCK_RELEASE_FAILED")
         except Exception as e:
             await self.session.rollback()
-            logger.error(f"Error while releasing lock: {e}")
+            FailureRegistry.record("LOCK_RELEASE_FAILED", f"Error while releasing lock: {e}", "ERROR")

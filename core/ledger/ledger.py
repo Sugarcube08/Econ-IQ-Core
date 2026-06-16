@@ -1,5 +1,6 @@
 import polars as pl
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +21,9 @@ class LedgerService:
         and materializes to Postgres.
         """
         if not dataframes:
-            logger.warning(f"No dataframes provided for batch {batch_id}")
+            FailureRegistry.record("LEDGER_NO_DATAFRAMES", f"No dataframes provided for batch {batch_id}", "WARNING")
             return pl.DataFrame()
 
-        logger.debug(f"Processing batch {batch_id} with {len(dataframes)} dataframes")
         new_events_df = pl.concat(dataframes, how="diagonal_relaxed")
 
         # 1. Start global sequence
@@ -107,16 +107,13 @@ class LedgerService:
 
         # Filter columns to only those present in the EventLedger model
         event_columns = [c.name for c in EventLedger.__table__.columns if c.name not in ["created_at", "updated_at"]]
-        logger.debug(f"EventLedger table columns: {event_columns}")
-        logger.debug(f"DataFrame columns: {df.columns}")
 
         # Select only valid columns that exist in the dataframe
         valid_cols = [c for c in event_columns if c in df.columns]
-        logger.debug(f"Valid columns for insertion: {valid_cols}")
         df_to_insert = df.select(valid_cols)
 
         records = df_to_insert.to_dicts()
-        
+
         # Ensure metadata is JSON-serializable (converts Decimal, UUID, date/datetime)
         if records:
             import decimal
@@ -141,16 +138,17 @@ class LedgerService:
                 if "metadata" in r and isinstance(r["metadata"], dict):
                     r["metadata"] = serialize_val(r["metadata"])
 
-        logger.debug(f"Attempting to bulk upsert {len(records)} records into event_ledger")
-        
         # Check for null event_ids which would cause insertion failures
         if records:
             null_event_ids = [r for r in records if r.get("event_id") is None]
             if null_event_ids:
-                logger.error(f"Found {len(null_event_ids)} records with NULL event_id. These will fail insertion.")
+                FailureRegistry.record(
+                    "LEDGER_NULL_EVENT_ID",
+                    f"Found {len(null_event_ids)} records with NULL event_id. These will fail insertion.",
+                    "ERROR",
+                )
                 # Filter out null event_ids to allow rest to proceed
                 records = [r for r in records if r.get("event_id") is not None]
-                logger.debug(f"Proceeding with {len(records)} records after filtering null event_ids")
 
         if records:
             batch_size = 1000
@@ -175,9 +173,13 @@ class LedgerService:
 
                 await session.execute(stmt)
 
-            logger.debug(f"Bulk upserted {len(records)} events into event_ledger")
+            FailureRegistry.recover("LEDGER_NO_RECORDS")
+            FailureRegistry.recover("LEDGER_NULL_EVENT_ID")
+            FailureRegistry.recover("LEDGER_NO_DATAFRAMES")
         else:
-            logger.warning("No records found to insert into event_ledger after column filtering")
+            FailureRegistry.record(
+                "LEDGER_NO_RECORDS", "No records found to insert into event_ledger after column filtering", "WARNING"
+            )
 
     def _apply_rg_semantics(self, df: pl.DataFrame) -> pl.DataFrame:
         if not settings.ENABLE_RG_SEMANTIC_CLASSIFICATION:
@@ -188,6 +190,7 @@ class LedgerService:
             df = df.with_columns(pl.lit(None).alias("rg_responsibility").cast(pl.Utf8))
 
         from core.policy.manager import policy_manager
+
         policy = policy_manager.policy.stress
 
         return df.with_columns(

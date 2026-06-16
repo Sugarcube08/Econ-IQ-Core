@@ -11,7 +11,6 @@ class ActivityDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame({"customer_id": [], "date": [], "dim_activity": []})
 
-        logger.debug("Computing Dimension 1: Commercial Activity")
         
         df = features_df.select(
             [

@@ -25,7 +25,6 @@ class ConfidenceEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing deterministic multi-dimensional evidence confidence weighting")
 
         # Fallback for org metrics if not provided
         p95_billing = (org_metrics or {}).get("p95_billing", 500000.0)

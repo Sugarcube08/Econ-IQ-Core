@@ -25,7 +25,6 @@ class MLDatasetBuilder:
         """
         Builds a single stateful feature dataset for a set of customers as of a target historical date.
         """
-        logger.info(f"Building ML training dataset for {len(customer_ids)} customers as of {end_date}")
         history_df = await self.ledger_context.load_customer_history(session, customer_ids)
         if history_df.is_empty():
             return pl.DataFrame()
@@ -56,5 +55,4 @@ class MLDatasetBuilder:
         val = shuffled.slice(n_train, n_val).drop("shuffle_hash")
         test = shuffled.slice(n_train + n_val).drop("shuffle_hash")
 
-        logger.info(f"Dataset split: Train={len(train)} | Val={len(val)} | Test={len(test)}")
         return train, val, test

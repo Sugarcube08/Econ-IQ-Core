@@ -12,7 +12,6 @@ class StabilityDimensionEngine:
         if features_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Computing Dimension 8: Stability & Predictability")
 
         df = features_df.select(
             [

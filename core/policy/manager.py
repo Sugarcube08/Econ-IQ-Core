@@ -2,6 +2,7 @@ import os
 
 import yaml
 from loguru import logger
+from core.observability.failure_registry import FailureRegistry
 
 from core.policy.models import EconiqPolicy
 
@@ -13,7 +14,6 @@ class PolicyManager:
 
     def load_policy(self) -> EconiqPolicy:
         if not os.path.exists(self.config_path):
-            logger.info(f"Policy configuration file '{self.config_path}' not found. Initializing with hardcoded platform defaults.")
             return EconiqPolicy()
         
         try:
@@ -21,10 +21,10 @@ class PolicyManager:
                 data = yaml.safe_load(f) or {}
             
             policy = EconiqPolicy.model_validate(data)
-            logger.info(f"Successfully loaded and validated policy parameters from '{self.config_path}'")
+            FailureRegistry.recover("POLICY_VALIDATION_FAILED")
             return policy
         except Exception as e:
-            logger.error(f"Error validating policy file '{self.config_path}', falling back to default values. Error: {e}")
+            FailureRegistry.record("POLICY_VALIDATION_FAILED", f"Error validating policy file '{self.config_path}', falling back to default values. Error: {e}", "ERROR")
             return EconiqPolicy()
 
     @property

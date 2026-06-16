@@ -21,7 +21,6 @@ class TradeConsistencyEngine:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug(f"Computing trade consistency and participation density over {context.window_days}d")
 
         # 1. Participation Density (Days with SALE / Total Days in Window)
         window_days = context.window_days

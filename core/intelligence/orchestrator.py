@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 from loguru import logger
 from sqlalchemy import select
+from core.observability.failure_registry import FailureRegistry
 
 from core.feature_store.engineer import FeatureEngineer
 from core.intelligence.cadence.engine import CadenceEngine
@@ -288,16 +289,17 @@ class IntelligenceOrchestrator:
         Autonomous recomputation loop for a set of customers.
         Computes Current (365d) and Previous (730d-365d) windows and persists to cache.
         """
-        logger.debug("PROCESSING | Starting Autonomous Intelligence Recomputation", extra={"customers_count": len(customer_ids)})
         start_time = datetime.now(UTC)
         failures_count = 0
         warnings_count = 0
+        alerts_count = 0
+        commitments_count = 0
+        broken_commitments_count = 0
 
         async with AsyncSessionLocal() as session:
             # 1. Load FULL history for all affected customers
             runtime_df = await self.ledger_context.load_customer_history(session, customer_ids)
             if runtime_df.is_empty():
-                logger.debug("PROCESSING | No historical events found for requested customers.")
                 return
 
             repo = IntelligenceRepository(session)
@@ -365,11 +367,12 @@ class IntelligenceOrchestrator:
                                 "behavioral_profile": row.behavioral_profile or {}
                             }
             except Exception as e:
-                logger.warning("FAILURE | Could not load customer details in bulk", extra={"error": str(e)})
+                FailureRegistry.record("CUSTOMER_DETAILS_LOAD_FAILED", f"Could not load customer details in bulk: {e}", "WARNING", extra={"error": str(e)})
 
             # 4. Process each customer
-            from core.models.state_models import EventLedger
             import uuid as uuid_pkg
+
+            from core.models.state_models import EventLedger
 
             for cid in customer_ids:
                 try:
@@ -401,7 +404,6 @@ class IntelligenceOrchestrator:
                         
                         if cust_df.is_empty():
                             # Handle Zero-History Customer (inactive initialization)
-                            logger.debug("PROCESSING | Initializing inactive state for zero-history customer", extra={"customer_id": cid})
                             intel_data = {
                                 "customer_id": cid,
                                 "customer_name": customer_name,
@@ -669,39 +671,56 @@ class IntelligenceOrchestrator:
                         # Trigger persistent alerts & recommendations generation
                         try:
                             from core.services.alert_service import AlertService
-                            await AlertService().scan_and_generate_alerts(cid, session)
+                            generated_alerts = await AlertService().scan_and_generate_alerts(cid, session)
+                            alerts_count += len(generated_alerts)
                         except Exception as e_alert:
                             warnings_count += 1
-                            logger.debug("PROCESSING | Failed to generate alerts for customer", extra={"customer_id": cid, "error": str(e_alert)})
 
                         try:
                             from core.recommendation.service import RecommendationService
                             await RecommendationService().generate_recommendations(session, cid)
                         except Exception as e_rec:
                             warnings_count += 1
-                            logger.debug("PROCESSING | Failed to generate recommendations for customer", extra={"customer_id": cid, "error": str(e_rec)})
 
                         try:
                             from core.services.collections_service import CollectionsService
-                            await CollectionsService().evaluate_commitments(cid, session)
+                            eval_commitments, broken_commitments = await CollectionsService().evaluate_commitments(cid, session)
+                            commitments_count += eval_commitments
+                            broken_commitments_count += broken_commitments
                         except Exception as e_comm:
                             warnings_count += 1
-                            logger.debug("PROCESSING | Failed to evaluate commitments for customer", extra={"customer_id": cid, "error": str(e_comm)})
 
                 except Exception as e:
                     failures_count += 1
-                    logger.debug("PROCESSING | Failed to recompute intelligence for customer", extra={"customer_id": cid, "error": str(e)})
                     continue
 
             await session.commit()
             duration = (datetime.now(UTC) - start_time).total_seconds()
+            
+            # Query the count of activities logged for these customers during the batch timeframe
+            from sqlalchemy import func
+            from core.models.state_models import CollectionActivity
+            activities_stmt = select(func.count(CollectionActivity.id)).where(
+                CollectionActivity.customer_id.in_(customer_ids),
+                CollectionActivity.created_at >= start_time - timedelta(minutes=5)
+            )
+            activities_res = await session.execute(activities_stmt)
+            activities_count = activities_res.scalar() or 0
+
             logger.info(
-                "PROCESSING | Intelligence Recompute Completed",
+                "recompute_completed",
                 extra={
-                    "Customers": len(customer_ids),
-                    "Duration": f"{duration:.2f}s",
-                    "Failures": failures_count,
-                    "Warnings": warnings_count
+                    "duration_sec": duration,
+                    "customers": len(customer_ids),
+                    "alerts": alerts_count
+                }
+            )
+            logger.info(
+                "collection_cycle_completed",
+                extra={
+                    "activities": activities_count,
+                    "commitments": commitments_count,
+                    "broken_commitments": broken_commitments_count
                 }
             )
 
@@ -710,7 +729,6 @@ class IntelligenceOrchestrator:
         Dynamically computes intelligence for the requested customers and context.
         Does NOT persist to database.
         """
-        logger.debug("PROCESSING | Dynamically computing intelligence", extra={"customers_count": len(customer_ids), "context": context.window_str})
 
         async with AsyncSessionLocal() as session:
             repo = IntelligenceRepository(session)
@@ -780,7 +798,6 @@ class IntelligenceOrchestrator:
         Dynamically computes the full intelligence timeline for a single customer.
         Returns the joined states and confidence dataframe for all days in the window.
         """
-        logger.debug("PROCESSING | Computing intelligence timeline", extra={"customer_id": customer_id, "context": context.window_str})
 
         async with AsyncSessionLocal() as session:
             repo = IntelligenceRepository(session)

@@ -10,7 +10,6 @@ from core.prediction.contracts import (
     OpportunityPrediction,
     RiskPrediction,
 )
-from core.prediction.inference import InferenceEngine
 from core.prediction.interfaces import (
     IInferenceEngine,
     IModelEstimator,
@@ -34,6 +33,5 @@ __all__ = [
     "OpportunityPrediction",
     "ModelMetadataContract",
     "model_registry",
-    "InferenceEngine",
     "prediction_monitor",
 ]

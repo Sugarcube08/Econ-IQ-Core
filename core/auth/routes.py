@@ -149,17 +149,3 @@ async def get_me(request: Request, current_user: User = Depends(get_current_user
         request=request
     )
 
-
-@router.get("/debug/ip", response_model=StandardResponse[dict])
-async def debug_ip(request: Request):
-    """
-    Diagnostic endpoint to verify client IP detection.
-    Should be protected or disabled in strict production if needed.
-    """
-    data = {
-        "detected_ip": get_client_ip(request),
-        "request_client_host": request.client.host if request.client else "none",
-        "headers": dict(request.headers),
-        "environment": settings.APP_ENV
-    }
-    return success_response("Client IP diagnostic info", data=data, request=request)

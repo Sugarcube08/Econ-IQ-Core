@@ -26,6 +26,7 @@ from core.operations.routes import router as operations_router
 from core.schemas.responses import StandardResponse
 from core.storage.postgres import AsyncSessionLocal, Base, engine
 from core.storage.redis import redis_manager
+from core.observability.failure_registry import FailureRegistry
 
 
 async def start_sync_worker():
@@ -36,13 +37,13 @@ async def start_sync_worker():
     sync_pipeline = SyncPipeline()
     while True:
         try:
-            logger.debug("PROCESSING | Running background event sync cycle")
             await sync_pipeline.run_cycle()
+            FailureRegistry.recover("BACKGROUND_SYNC_WORKER_UNHANDLED")
         except asyncio.CancelledError:
             logger.info("SYSTEM | Background sync worker cancelled")
             break
         except Exception as e:
-            logger.error("FAILURE | Unhandled error in background sync worker", extra={"error": str(e)})
+            FailureRegistry.record("BACKGROUND_SYNC_WORKER_UNHANDLED", f"Unhandled error in background sync worker: {e}", "ERROR", extra={"error": str(e)})
         await asyncio.sleep(10)
 
 
@@ -62,15 +63,14 @@ async def lifespan(app: FastAPI):
     # Initialize Persistence
     if not settings.SKIP_SCHEMA_VERIFICATION:
         async with engine.begin() as conn:
-            logger.info("SYSTEM | Verifying database schema")
             try:
                 await conn.run_sync(Base.metadata.create_all)
+                FailureRegistry.recover("DB_SCHEMA_VERIFY_RACE")
             except Exception as e:
                 if "already exists" in str(e):
-                    logger.warning("SYSTEM | Database schema verification race condition handled", extra={"error": str(e)})
+                    FailureRegistry.record("DB_SCHEMA_VERIFY_RACE", f"Database schema verification race condition handled: {e}", "WARNING", extra={"error": str(e)})
                 else:
                     raise
-            logger.info("SYSTEM | Database schema verified")
 
         # Run strict schema validation (Zero mutations, verification only)
         async with engine.connect() as conn:
@@ -86,7 +86,6 @@ async def lifespan(app: FastAPI):
                         "Please run Alembic migrations ('alembic upgrade head') before starting the application."
                     )
             await conn.run_sync(validate_schema)
-            logger.info("SYSTEM | Database schema alignment validated successfully")
 
         async with AsyncSessionLocal() as session:
             await sync_pipeline.upgrade_raw_tables_schema(session)

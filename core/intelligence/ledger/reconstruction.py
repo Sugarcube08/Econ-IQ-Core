@@ -20,7 +20,6 @@ class LedgerReconstructionEngine:
         if ledger_df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        logger.debug("Reconstructing chronological customer exposure")
 
         # 1. Prepare Daily Delta
         # Sales (+) | Payments (-) | Returns (-)
