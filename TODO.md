@@ -75,452 +75,529 @@ Future Models
 
 ---
 
+# Today's Plan (LOCKED)
+
+Estimated time : 10–12 hours
+
+---
+
+# PHASE 0
+
+## ML Infrastructure Skeleton
+
+Target
+
+```text
+core/ml/
+
+    features/
+
+    predictions/
+
+    outcomes/
+
+    feedback/
+
+    datasets/
+
+    inference/
+
+    shared/
+
+    interfaces/
+```
+
+Files
+
+```text
+__init__.py
+
+interfaces.py
+
+types.py
+
+enums.py
+```
+
+Goal
+
+Nothing implemented.
+
+Only architecture.
+
+---
+
 # PHASE 1
 
-## FEATURE STORE
+# Feature Store
 
-Target Time:
+Estimated
+
 4 Hours
 
-Create:
+First question:
 
-core/ml/features/
+**Can every customer be reconstructed at any point in time?**
 
-Files:
+If answer is yes
 
-feature_builder.py
+Feature Store PASS
 
-feature_snapshot.py
+Table
 
-feature_repository.py
-
-feature_validator.py
-
----
-
-Create table:
-
+```text
 feature_snapshots
+```
 
-Columns:
+Add
 
-snapshot_id
+```text
+snapshot_source
 
-customer_id
+snapshot_version
 
-snapshot_date
+generator_version
 
-health_score
+feature_hash
+```
 
-risk_score
-
-trust_score
-
-growth_score
-
-collection_score
-
-relationship_score
-
-credit_score
-
-opportunity_score
-
-current_state
-
-customer_archetype
-
-risk_direction
-
-trust_direction
-
-billing_30d
-
-billing_90d
-
-payments_30d
-
-payments_90d
-
-returns_30d
-
-purchase_gap
-
-payment_delay_avg
-
-outstanding_current
-
-credit_utilization
-
-feature_payload_json
-
-created_at
+Because later you'll recalibrate features.
 
 ---
 
-Requirements:
+### Snapshot philosophy
 
-Every customer must be snapshot-able.
+Never
 
-Snapshots must be immutable.
+```text
+UPDATE
+```
 
-Never update snapshots.
+Only
 
-Always append.
-
-PASS CONDITION:
-
-Feature snapshots generated successfully for all customers.
+```text
+INSERT
+```
 
 ---
 
 # PHASE 2
 
-## PREDICTION REGISTRY
+# Outcome Registry
 
-Target Time:
+Estimated
+
 2 Hours
 
-Create:
+This is actually the most important thing today.
 
-core/ml/predictions/
+Table
 
-Files:
+```text
+actual_outcomes
+```
 
-prediction_registry.py
-
-prediction_service.py
-
----
-
-Create table:
-
-predictions
-
-Columns:
-
-prediction_id
-
-customer_id
-
-prediction_type
-
-prediction_value
-
-confidence
-
-explanation_json
-
-feature_snapshot_id
-
-model_version
-
-created_at
-
-status
+Outcome derivation examples
 
 ---
 
-Prediction Types:
+Churned
 
-CHURN
-
-DELINQUENCY
-
-DISTRESS
-
-STATE_TRANSITION
+```text
+purchase_gap > 90
+```
 
 ---
 
-Requirements:
+Distressed
 
-Store predictions.
+```text
+Healthy
 
-Never overwrite.
+↓
 
-Always append.
+Stressed
 
-PASS CONDITION:
+↓
 
-Predictions persist successfully.
+Distressed
+```
+
+---
+
+Recovered
+
+```text
+Distressed
+
+↓
+
+Recovering
+
+↓
+
+Healthy
+```
+
+---
+
+Delinquent
+
+```text
+repayment_days > 45
+```
+
+---
+
+State changed
+
+```text
+Healthy
+
+↓
+
+Growing
+```
+
+---
+
+PASS
+
+Generate outcomes for all customers.
 
 ---
 
 # PHASE 3
 
-## OUTCOME REGISTRY
+# Prediction Registry
 
-Target Time:
-3 Hours
+Estimated
 
-Create:
+1 hour
 
-core/ml/outcomes/
+Table
 
-Files:
+```text
+predictions
+```
 
-outcome_tracker.py
+Prediction
 
-outcome_service.py
+Store
+
+```text
+prediction_type
+
+
+predicted_probability
+
+
+confidence
+
+
+snapshot_id
+
+
+status
+
+
+version
+
+
+explanation_json
+```
+
+Status
+
+```text
+PENDING
+
+
+EVALUATED
+
+
+CORRECT
+
+
+WRONG
+```
 
 ---
 
-Create table:
+PASS
 
-actual_outcomes
-
-Columns:
-
-outcome_id
-
-customer_id
-
-outcome_type
-
-outcome_value
-
-event_date
-
-source_event_id
-
-resolved_at
-
-created_at
-
----
-
-Outcome Types:
-
-CHURNED
-
-DELINQUENT
-
-DISTRESSED
-
-RECOVERED
-
-STATE_CHANGED
-
----
-
-Requirements:
-
-Outcomes derived automatically from ledger behavior.
-
-No manual labeling.
-
-PASS CONDITION:
-
-Outcomes generated automatically.
+Prediction can be inserted
 
 ---
 
 # PHASE 4
 
-## FEEDBACK ENGINE
+# Feedback Engine
 
-Target Time:
-3 Hours
+Estimated
 
-Create:
+2 hours
 
-core/ml/feedback/
+This is the soul of EconIQ.
 
-Files:
+Compare
 
-feedback_engine.py
-
-feedback_repository.py
-
----
-
-Create table:
-
-prediction_feedback
-
-Columns:
-
-feedback_id
-
-prediction_id
-
-outcome_id
-
-was_correct
-
-error_distance
-
-evaluation_date
-
-created_at
-
----
-
-Responsibilities:
-
-Compare:
-
+```text
 Prediction
 
-vs
 
-Actual Outcome
+Outcome
+```
 
-Calculate:
+Store
 
-Accuracy
+```text
+accuracy
 
-Precision
 
-Recall
+precision
 
-Outcome Match
 
-Prediction Error
+recall
+
+
+brier_score
+
+
+prediction_error
+```
 
 ---
 
-PASS CONDITION:
+PASS
 
-Predictions automatically evaluated.
+Prediction automatically evaluated
 
 ---
 
 # PHASE 5
 
-## DATASET BUILDER
+# Dataset Builder
 
-Target Time:
-3 Hours
+Estimated
 
-Create:
+2 hours
 
-core/ml/datasets/
+Generate
 
-Files:
-
-dataset_builder.py
-
-dataset_validator.py
-
----
-
-Generate:
-
+```text
 training_dataset.parquet
+```
 
-from:
+from
 
+```text
 feature_snapshots
+
+
 +
+
+
 actual_outcomes
+```
+
+No train split
+
+No test split
+
+No xgboost
+
+No shap
+
+Just
+
+```text
+Dataset Exists
+```
 
 ---
 
-Rules:
+PASS
 
-No future leakage.
-
-No target leakage.
-
-Point-in-time safe.
-
----
-
-PASS CONDITION:
-
-Dataset generated automatically.
-
-No manual exports required.
+Dataset generation works
 
 ---
 
 # PHASE 6
 
-## FIRST PREDICTION FRAMEWORK
+# Bootstrap Predictor
 
-Target Time:
-4 Hours
+Estimated
 
-Create:
+1 hour
 
-core/ml/inference/
+No ML.
 
-Files:
+No sklearn.
 
-risk_predictor.py
+Use existing intelligence.
 
-delinquency_predictor.py
+Example
 
-prediction_orchestrator.py
+```python
 
----
+predicted_distress_probability = risk_score
 
-IMPORTANT
 
-Do NOT train models yet.
+predicted_delinquency_probability = 1 - collection_score
 
-Use current intelligence outputs as bootstrap predictors.
 
-Example:
+predicted_churn_probability = purchase_gap / 120
 
-Risk Prediction
+```
 
-Input:
+Insert predictions.
 
-risk_score
+Evaluate predictions.
 
-Output:
+Generate feedback.
 
-predicted_distress_probability
-
-Store prediction inside registry.
-
----
-
-Goal:
-
-Exercise the complete prediction lifecycle.
-
-Prediction
-↓
-Registry
-↓
-Outcome
-↓
-Feedback
-
----
-
-PASS CONDITION:
-
-End-to-end prediction lifecycle works.
+Done.
 
 ---
 
 # PHASE 7
 
-## ML READINESS AUDIT
+# Certification
 
-Target Time:
-2 Hours
+Generate
 
-Create:
-
+```text
 docs/
+
 
 ML_FEATURE_STORE_AUDIT.md
 
-PREDICTION_REGISTRY_AUDIT.md
 
 OUTCOME_REGISTRY_AUDIT.md
 
+
+PREDICTION_REGISTRY_AUDIT.md
+
+
 FEEDBACK_ENGINE_AUDIT.md
+
 
 DATASET_BUILDER_AUDIT.md
 
-ML_READINESS_CERTIFICATION.md
+
+LEARNING_SYSTEM_CERTIFICATION.md
+
+```
+
+---
+
+# Things forbidden today
+
+Do not build
+
+```text
+XGBoost
+
+
+CatBoost
+
+
+LightGBM
+
+
+SHAP
+
+
+Advisor
+
+
+LLMs
+
+
+Retraining
+
+
+Model Registry
+
+
+Drift Monitoring
+
+
+Online Learning
+
+
+MLOps
+
+
+Forecasting
+
+
+Credit Optimization
+
+
+Collections Prioritization
+
+
+RAG
+
+
+Agents
+```
+
+---
+
+# End Goal for Tonight
+
+For customer
+
+```text
+CUST_00421
+```
+
+EconIQ should answer
+
+```text
+Feature Snapshot Exists
+
+
+Prediction Exists
+
+
+Outcome Exists
+
+
+Prediction Evaluated
+
+
+Accuracy Known
+
+
+Dataset Generated
+```
+
+If that works, then tomorrow morning you won't be building ML.
+
+You'll already have built the thing that most companies don't have:
+
+```text
+Commercial Intelligence
+
+↓
+
+Prediction Infrastructure
+
+↓
+
+Outcome Tracking
+
+↓
+
+Learning Infrastructure
+
+
+(Models become plugins)
+```
 
 ---
 
