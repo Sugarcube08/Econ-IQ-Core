@@ -11,43 +11,43 @@ from core.ml.predictions.prediction_registry import prediction_registry
 from core.ml.predictions.prediction_repository import PredictionRepository
 from core.ml.features.feature_repository import FeatureRepository
 from core.ml.shared.types import FeatureSnapshotDTO
-from core.ml.policies import get_policy_profile
 
 class ChurnModel:
     """Heuristic model for Churn prediction."""
-    def predict(self, snapshot: FeatureSnapshotDTO) -> float:
-        profile = get_policy_profile("default")
+    def predict(self, snapshot: FeatureSnapshotDTO, thresholds: dict = None) -> float:
+        churn_window = thresholds.get("CHURN_WINDOW_DAYS", 90) if thresholds else 90
         gap = snapshot.purchase_gap if snapshot.purchase_gap is not None else 30
-        prob = gap / float(profile.churn_window_days)
+        prob = gap / float(churn_window)
         return max(0.0, min(1.0, prob))
 
 class DelinquencyModel:
     """Heuristic model for Delinquency prediction."""
-    def predict(self, snapshot: FeatureSnapshotDTO) -> float:
-        profile = get_policy_profile("default")
+    def predict(self, snapshot: FeatureSnapshotDTO, thresholds: dict = None) -> float:
+        delinquency_days = thresholds.get("DELINQUENCY_WINDOW_DAYS", 45) if thresholds else 45
         delay = snapshot.payment_delay_avg if snapshot.payment_delay_avg is not None else 0.0
-        prob = delay / float(profile.delinquency_threshold_days)
+        prob = delay / float(delinquency_days)
         return max(0.0, min(1.0, prob))
 
 class DistressModel:
     """Heuristic model for Distress prediction."""
-    def predict(self, snapshot: FeatureSnapshotDTO) -> float:
-        profile = get_policy_profile("default")
+    def predict(self, snapshot: FeatureSnapshotDTO, thresholds: dict = None) -> float:
+        distress_thresh = thresholds.get("DISTRESS_THRESHOLD", 0.70) if thresholds else 0.70
         risk = snapshot.risk_score if snapshot.risk_score is not None else 0.5
-        prob = risk / profile.distress_threshold
+        prob = risk / distress_thresh
         return max(0.0, min(1.0, prob))
 
 class RecoveryModel:
     """Heuristic model for Recovery prediction."""
-    def predict(self, snapshot: FeatureSnapshotDTO) -> float:
+    def predict(self, snapshot: FeatureSnapshotDTO, thresholds: dict = None) -> float:
+        recovery_thresh = thresholds.get("RECOVERY_THRESHOLD", 0.65) if thresholds else 0.65
         trust = snapshot.trust_score if snapshot.trust_score is not None else 0.5
         eff = snapshot.collection_efficiency if snapshot.collection_efficiency is not None else 1.0
-        prob = trust * eff
+        prob = (trust * eff) / recovery_thresh
         return max(0.0, min(1.0, prob))
 
 class StateTransitionModel:
     """Heuristic model for State Transition prediction."""
-    def predict(self, snapshot: FeatureSnapshotDTO) -> float:
+    def predict(self, snapshot: FeatureSnapshotDTO, thresholds: dict = None) -> float:
         health = snapshot.health_score if snapshot.health_score is not None else 0.5
         return max(0.0, min(1.0, 1.0 - health))
 
@@ -79,15 +79,20 @@ async def generate_predictions_for_snapshot(
     pred_repo = PredictionRepository(session)
     results = []
 
+    # Load active policy thresholds from PolicyRegistry
+    from core.ml.policies.policy_service import PolicyService
+    policy_svc = PolicyService(session)
+    thresholds = await policy_svc.get_active_thresholds()
+
     mapping = {
-        PredictionType.CHURN: "churn_v1",
-        PredictionType.DELINQUENCY: "delinquency_v1",
-        PredictionType.DISTRESS: "distress_v1",
-        PredictionType.RECOVERY: "recovery_v1",
-        PredictionType.STATE_TRANSITION: "state_transition_v1"
+        PredictionType.CHURN: ("churn_v1", thresholds.get("CHURN_WINDOW_DAYS", 90)),
+        PredictionType.DELINQUENCY: ("delinquency_v1", thresholds.get("DELINQUENCY_WINDOW_DAYS", 45)),
+        PredictionType.DISTRESS: ("distress_v1", 90),
+        PredictionType.RECOVERY: ("recovery_v1", thresholds.get("RECOVERY_WINDOW_DAYS", 60)),
+        PredictionType.STATE_TRANSITION: ("state_transition_v1", 90)
     }
 
-    for pred_type, model_id in mapping.items():
+    for pred_type, (model_id, horizon_days) in mapping.items():
         # Prevent duplicate predictions per snapshot
         exists = await pred_repo.prediction_exists(customer_id, snapshot_id, pred_type.value)
         if exists:
@@ -97,7 +102,13 @@ async def generate_predictions_for_snapshot(
         if not model:
             continue
 
-        value = model.predict(snapshot)
+        # Pass the loaded thresholds to the predict method (or check if it is a real model with predict_proba)
+        if hasattr(model, "predict_proba"):
+            import numpy as np
+            value = float(model.predict_proba(snapshot)[0])
+        else:
+            value = model.predict(snapshot, thresholds=thresholds)
+
         confidence = 0.85  # heuristic confidence factor
 
         dto = CustomerPredictionDTO(
@@ -109,7 +120,7 @@ async def generate_predictions_for_snapshot(
             prediction_value=value,
             confidence=confidence,
             generated_at=datetime.combine(snapshot.snapshot_date, datetime.min.time()).replace(tzinfo=UTC),
-            prediction_horizon_days=90,
+            prediction_horizon_days=horizon_days,
             prediction_status=PredictionStatus.PENDING,
             metadata_json={"features": snapshot.model_dump(mode='json')}
         )

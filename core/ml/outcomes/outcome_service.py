@@ -17,7 +17,6 @@ from core.ml.predictions.prediction_repository import PredictionRepository
 from core.ml.outcomes.outcome_repository import OutcomeRepository, PredictionOutcomeDTO
 from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.schemas.intelligence import AnalysisContext
-from core.ml.policies import get_policy_profile
 
 async def get_customer_state_at(customer_id: str, target_date: date, session: AsyncSession) -> str:
     """Retrieves the current state of a customer from CustomerIntelligence."""
@@ -27,7 +26,7 @@ async def get_customer_state_at(customer_id: str, target_date: date, session: As
     return state or "healthy"
 
 async def resolve_churn(customer_id: str, prediction_date: date, evaluation_date: date, session: AsyncSession) -> float:
-    """Churn: 1.0 if no SALE events occurred in the 90 days after prediction date, else 0.0."""
+    """Churn: 1.0 if no SALE events occurred in the tracking window after prediction date, else 0.0."""
     stmt = select(func.count(EventLedger.event_id)).where(
         and_(
             EventLedger.customer_id == customer_id,
@@ -41,9 +40,9 @@ async def resolve_churn(customer_id: str, prediction_date: date, evaluation_date
     sale_count = res.scalar() or 0
     return 1.0 if sale_count == 0 else 0.0
 
-async def resolve_delinquency(customer_id: str, prediction_date: date, evaluation_date: date, session: AsyncSession) -> float:
-    """Delinquency: 1.0 if average delay > 45 days or any broken commitment occurred in the tracking period, else 0.0."""
-    profile = get_policy_profile("default")
+async def resolve_delinquency(customer_id: str, prediction_date: date, evaluation_date: date, session: AsyncSession, thresholds: dict) -> float:
+    """Delinquency: 1.0 if average delay > delinquency_threshold_days or any broken commitment occurred, else 0.0."""
+    delinquency_days = thresholds.get("DELINQUENCY_WINDOW_DAYS", 45)
     
     # 1. Check broken commitments
     stmt_commit = select(func.count(PaymentCommitment.id)).where(
@@ -89,7 +88,7 @@ async def resolve_delinquency(customer_id: str, prediction_date: date, evaluatio
         settlement_df = engine.compute_settlements(ledger_df, context)
         if not settlement_df.is_empty():
             avg_delay = float(settlement_df["avg_repayment_days"][0])
-            if avg_delay > profile.delinquency_threshold_days:
+            if avg_delay > delinquency_days:
                 return 1.0
 
     return 0.0
@@ -123,6 +122,11 @@ async def evaluate_pending_predictions(session: AsyncSession) -> List[Prediction
     now_dt = datetime.now(UTC)
     current_date = now_dt.date()
 
+    # Load policy thresholds
+    from core.ml.policies.policy_service import PolicyService
+    policy_svc = PolicyService(session)
+    thresholds = await policy_svc.get_active_thresholds()
+
     for pred in pending:
         # Check if the evaluation date has arrived
         evaluation_date = pred.generated_at.date() + timedelta(days=pred.prediction_horizon_days)
@@ -140,7 +144,7 @@ async def evaluate_pending_predictions(session: AsyncSession) -> List[Prediction
             if p_type == PredictionType.CHURN.value:
                 actual_value = await resolve_churn(pred.customer_id, pred.generated_at.date(), evaluation_date, session)
             elif p_type == PredictionType.DELINQUENCY.value:
-                actual_value = await resolve_delinquency(pred.customer_id, pred.generated_at.date(), evaluation_date, session)
+                actual_value = await resolve_delinquency(pred.customer_id, pred.generated_at.date(), evaluation_date, session, thresholds)
             elif p_type == PredictionType.DISTRESS.value:
                 actual_value = await resolve_distress(pred.customer_id, pred.generated_at.date(), evaluation_date, session)
             elif p_type == PredictionType.RECOVERY.value:

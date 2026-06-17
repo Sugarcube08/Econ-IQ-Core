@@ -9,6 +9,10 @@ from core.ml.features.feature_snapshot import generate_snapshot
 from core.ml.predictions.prediction_service import generate_predictions_for_snapshot
 from core.ml.outcomes.outcome_service import evaluate_pending_predictions
 from core.ml.feedback.feedback_service import calculate_and_persist_feedback_metrics
+from core.ml.datasets.dataset_builder import build_training_dataset
+from core.ml.training.trainer import train_and_save_models
+from core.ml.explainability.shap_service import SHAPService
+from core.ml.explainability.explanation_repository import ExplanationRepository
 
 async def run_ml_pipeline_cycle() -> None:
     """
@@ -17,6 +21,9 @@ async def run_ml_pipeline_cycle() -> None:
     2. Run inference & persist predictions (per customer).
     3. Attempt outcome resolution (over all pending predictions).
     4. Update feedback metrics.
+    5. Compile training dataset from feature store and outcomes.
+    6. Train XGBoost v1 classifiers.
+    7. Verify explainability output.
     """
     logger.info("ML | Starting daily ML Pipeline cycle.")
     
@@ -66,6 +73,41 @@ async def run_ml_pipeline_cycle() -> None:
         logger.info(f"ML | Generated feedback metrics for {len(feedback)} model/type groups.")
     except Exception as e:
         logger.error(f"ML | Feedback metric update failed: {e}")
+
+    # Step 5: Build training dataset
+    logger.info("ML | Building training dataset...")
+    try:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                df, stats = await build_training_dataset(session, "training_dataset.parquet")
+        logger.info(f"ML | Dataset built: {len(df)} rows. Stats: {stats}")
+    except Exception as e:
+        logger.error(f"ML | Dataset building failed: {e}")
+
+    # Step 6: Train models
+    logger.info("ML | Training ML models...")
+    try:
+        report = train_and_save_models("training_dataset.parquet", "models")
+        logger.info(f"ML | Models trained: {report}")
+    except Exception as e:
+        logger.error(f"ML | Model training failed: {e}")
+
+    # Step 7: Explainability verification
+    logger.info("ML | Verifying explainability on a sample customer...")
+    try:
+        if customer_ids:
+            sample_cid = customer_ids[0]
+            async with AsyncSessionLocal() as session:
+                repo = ExplanationRepository(session)
+                features = await repo.get_latest_features(sample_cid)
+            if features:
+                shap_svc = SHAPService()
+                explanation = shap_svc.explain_prediction(features, model_type="churn")
+                logger.info(f"ML | Explainability verified for {sample_cid}: prediction={explanation['prediction']}, top_factors={explanation['top_factors']}")
+            else:
+                logger.warning(f"ML | No features found for sample customer {sample_cid} to verify explainability.")
+    except Exception as e:
+        logger.error(f"ML | Explainability verification failed: {e}")
         
     logger.info("ML | Daily ML Pipeline cycle complete.")
 

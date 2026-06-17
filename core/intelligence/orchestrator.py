@@ -310,6 +310,10 @@ class IntelligenceOrchestrator:
                 now = datetime.now(UTC)
             current_end = now.replace(minute=0, second=0, microsecond=0)
 
+            from core.ml.policies.policy_service import PolicyService
+            policy_svc = PolicyService(session)
+            thresholds = await policy_svc.get_active_thresholds()
+
             current_start = current_end - timedelta(days=365)
             prev_end = current_start - timedelta(microseconds=1)
             prev_start = current_start - timedelta(days=365)
@@ -513,11 +517,11 @@ class IntelligenceOrchestrator:
                         # State Inference
                         if behavioral_state == "inactive":
                             state_val = "dormant"
-                        elif curr_risk >= 0.70 or dim_discipline < 0.25:
+                        elif curr_risk >= thresholds.get("RISK_SCORE_THRESHOLD", 0.70) or dim_discipline < thresholds.get("DISTRESSED_DISCIPLINE_THRESHOLD", 0.25):
                             state_val = "distressed"
-                        elif curr_risk >= 0.50 or dim_discipline < 0.45:
+                        elif curr_risk >= thresholds.get("STRESSED_RISK_THRESHOLD", 0.50) or dim_discipline < thresholds.get("STRESSED_DISCIPLINE_THRESHOLD", 0.45):
                             state_val = "stressed"
-                        elif dim_credit < 0.35:
+                        elif dim_credit < thresholds.get("OVERLEVERAGED_CREDIT_THRESHOLD", 0.35):
                             state_val = "overleveraged"
                         elif trajectory in ("COLLAPSING", "DECLINING") or behavioral_state == "declining":
                             state_val = "declining"

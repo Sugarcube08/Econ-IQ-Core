@@ -36,6 +36,14 @@ class RecommendationRulesEngine:
                 customer_id=customer_id, generated_date=datetime.now(UTC).date(), recommendations=[]
             )
 
+        # Load active policy thresholds from Registry
+        from core.ml.policies.policy_service import PolicyService
+        policy_svc = PolicyService(session)
+        thresholds = await policy_svc.get_active_thresholds()
+
+        risk_threshold = thresholds.get("RISK_SCORE_THRESHOLD", 0.70)
+        collection_threshold = thresholds.get("COLLECTION_SCORE_THRESHOLD", 0.30)
+
         # 2. Clear existing ACTIVE recommendations for this customer
         await session.execute(
             delete(Recommendation).where(Recommendation.customer_id == customer_id, Recommendation.status == "ACTIVE")
@@ -114,7 +122,7 @@ class RecommendationRulesEngine:
             )
 
         # Rule 5: Reduce Exposure (High risk)
-        if r_score >= 0.70 or c_score >= 0.70:
+        if r_score >= risk_threshold or c_score >= collection_threshold:
             recs_to_add.append(
                 Recommendation(
                     id=str(uuid.uuid4()),
