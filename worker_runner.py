@@ -7,6 +7,7 @@ from core.storage.redis import redis_manager
 from core.ingestion.sync_pipeline import SyncPipeline
 from core.intelligence.background_worker import start_background_worker
 from core.observability.failure_registry import FailureRegistry
+from core.ml.worker import start_ml_worker_loop
 
 async def start_sync_worker():
     logger.info("WORKER | Starting background event sync worker loop")
@@ -32,10 +33,11 @@ async def main():
     # Start background tasks
     sync_task = asyncio.create_task(start_sync_worker())
     worker_task = asyncio.create_task(start_background_worker())
+    ml_task = asyncio.create_task(start_ml_worker_loop())
 
     logger.info("WORKER | econiq Worker Process Operational")
     try:
-        await asyncio.gather(sync_task, worker_task)
+        await asyncio.gather(sync_task, worker_task, ml_task)
     except asyncio.CancelledError:
         logger.info("WORKER | Worker cancelled. Cleaning up...")
     except KeyboardInterrupt:
@@ -43,8 +45,9 @@ async def main():
     finally:
         sync_task.cancel()
         worker_task.cancel()
+        ml_task.cancel()
         # Wait for cancellation
-        await asyncio.gather(sync_task, worker_task, return_exceptions=True)
+        await asyncio.gather(sync_task, worker_task, ml_task, return_exceptions=True)
         await redis_manager.disconnect()
         logger.info("WORKER | Worker shutdown complete")
 

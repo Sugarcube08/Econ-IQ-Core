@@ -27,6 +27,7 @@ from core.schemas.responses import StandardResponse
 from core.storage.postgres import AsyncSessionLocal, Base, engine
 from core.storage.redis import redis_manager
 from core.observability.failure_registry import FailureRegistry
+from core.ml.predictions.prediction_router import router as ai_router
 
 
 async def start_sync_worker():
@@ -183,6 +184,7 @@ async def health_check(request: Request):
 
 
 app.include_router(api_v1_router)
+app.include_router(ai_router)
 
 # -- OBSERVABILITY --
 

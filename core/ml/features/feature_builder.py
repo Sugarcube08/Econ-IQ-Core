@@ -140,6 +140,7 @@ class FeatureBuilder:
 
         # Outstanding current
         outstanding_current = intel.outstanding_current if intel and intel.outstanding_current is not None else 0.0
+        outstanding_current = max(0.0, outstanding_current)
 
         # Outstanding ratio
         outstanding_ratio = outstanding_current / billing_90d if billing_90d > 0.0 else 0.0

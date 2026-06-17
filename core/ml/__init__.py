@@ -1,3 +1,3 @@
-from core.ml import interfaces, shared, features
+from core.ml import interfaces, shared, features, predictions, outcomes, feedback, policies
 
-__all__ = ["interfaces", "shared", "features"]
+__all__ = ["interfaces", "shared", "features", "predictions", "outcomes", "feedback", "policies"]
