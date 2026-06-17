@@ -29,6 +29,8 @@ from core.storage.redis import redis_manager
 from core.observability.failure_registry import FailureRegistry
 from core.ml.predictions.prediction_router import router as ai_router
 from core.ml.explainability.explainability_router import router as explainability_router
+from core.ml.simulator.simulator_router import router as simulator_router
+from core.ml.advisor.advisor_router import router as advisor_router
 
 
 async def start_sync_worker():
@@ -173,6 +175,8 @@ api_v1_router.include_router(customer_detail_router)
 api_v1_router.include_router(dashboard_router)
 api_v1_router.include_router(operations_router)
 api_v1_router.include_router(explainability_router)
+api_v1_router.include_router(simulator_router)
+api_v1_router.include_router(advisor_router)
 
 
 @api_v1_router.get("/health", response_model=StandardResponse[dict])
