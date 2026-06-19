@@ -414,3 +414,26 @@ async def get_top_contributors(
     }
     return success_response("Top contributors retrieved successfully", data=data, metadata=metadata, request=request)
 
+
+@router.get(
+    "/graphs",
+    response_model=StandardResponse[dict],
+)
+async def get_portfolio_graphs_timeline(
+    request: Request,
+    window_days: int = Query(365, ge=1, le=720),
+    granularity: str = Query("monthly", pattern="^(daily|weekly|monthly)$"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """Retrieve unified portfolio graphs timeline aggregated on the backend."""
+    from core.repositories.graphs import GraphRepository
+    repo = GraphRepository(db)
+    timeline = await repo.refresh_portfolio_graphs(granularity, window_days)
+    return success_response(
+        "Unified portfolio graphs retrieved successfully",
+        data={"timeline": timeline},
+        request=request
+    )
+
+

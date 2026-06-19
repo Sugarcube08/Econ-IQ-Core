@@ -1432,3 +1432,27 @@ async def get_outstanding_graph(
         "processing_time_ms": int((time.time() - start_time) * 1000)
     }
     return success_response("Outstanding graph retrieved successfully", data={"graph": graph_data}, metadata=metadata, request=request)
+
+
+@customer_detail_router.get(
+    "/{id}/graphs",
+    response_model=StandardResponse[dict],
+)
+async def get_customer_graphs_timeline(
+    id: str,
+    request: Request,
+    window_days: int = Query(365, ge=1, le=720),
+    granularity: str = Query("monthly", pattern="^(daily|weekly|monthly)$"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """Retrieve unified customer graph timeline aggregated on the backend."""
+    from core.repositories.graphs import GraphRepository
+    repo = GraphRepository(db)
+    timeline = await repo.refresh_customer_graphs(id.strip(), granularity, window_days)
+    return success_response(
+        "Unified customer graphs retrieved successfully",
+        data={"timeline": timeline},
+        request=request
+    )
+
