@@ -15,8 +15,8 @@ from core.models.state_models import (
     BatchStatus,
     SyncBatch,
 )
-from core.storage.postgres import AsyncSessionLocal
 from core.observability.failure_registry import FailureRegistry
+from core.storage.postgres import AsyncSessionLocal
 
 
 class SyncPipeline:

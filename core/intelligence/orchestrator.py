@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 from loguru import logger
 from sqlalchemy import select
-from core.observability.failure_registry import FailureRegistry
 
 from core.feature_store.engineer import FeatureEngineer
 from core.intelligence.cadence.engine import CadenceEngine
@@ -27,6 +26,7 @@ from core.intelligence.states.engine import StateEngine
 from core.intelligence.trade.consistency import TradeConsistencyEngine
 from core.intelligence.validator import IntelligenceIntegrityValidator
 from core.ledger.context import LedgerContextService
+from core.observability.failure_registry import FailureRegistry
 from core.repositories.intelligence import IntelligenceRepository
 from core.schemas.intelligence import AnalysisContext
 from core.storage.postgres import AsyncSessionLocal
@@ -542,11 +542,11 @@ class IntelligenceOrchestrator:
                         event_date_to_use = current_end.date()
                         
                         # Helper to check if event already exists
-                        async def event_exists(evt_type: str) -> bool:
+                        async def event_exists(evt_type: str, customer_id: str = cid, event_date = event_date_to_use) -> bool:
                             check_stmt = select(EventLedger.event_id).where(
-                                EventLedger.customer_id == cid,
+                                EventLedger.customer_id == customer_id,
                                 EventLedger.event_type == evt_type,
-                                EventLedger.event_date == event_date_to_use
+                                EventLedger.event_date == event_date
                             ).limit(1)
                             check_res = await session.execute(check_stmt)
                             return check_res.scalar() is not None
@@ -676,13 +676,13 @@ class IntelligenceOrchestrator:
                             from core.services.alert_service import AlertService
                             generated_alerts = await AlertService().scan_and_generate_alerts(cid, session)
                             alerts_count += len(generated_alerts)
-                        except Exception as e_alert:
+                        except Exception:
                             warnings_count += 1
 
                         try:
                             from core.recommendation.service import RecommendationService
                             await RecommendationService().generate_recommendations(session, cid)
-                        except Exception as e_rec:
+                        except Exception:
                             warnings_count += 1
 
                         try:
@@ -690,10 +690,10 @@ class IntelligenceOrchestrator:
                             eval_commitments, broken_commitments = await CollectionsService().evaluate_commitments(cid, session)
                             commitments_count += eval_commitments
                             broken_commitments_count += broken_commitments
-                        except Exception as e_comm:
+                        except Exception:
                             warnings_count += 1
 
-                except Exception as e:
+                except Exception:
                     failures_count += 1
                     continue
 
@@ -702,6 +702,7 @@ class IntelligenceOrchestrator:
             
             # Query the count of activities logged for these customers during the batch timeframe
             from sqlalchemy import func
+
             from core.models.state_models import CollectionActivity
             activities_stmt = select(func.count(CollectionActivity.id)).where(
                 CollectionActivity.customer_id.in_(customer_ids),

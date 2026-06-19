@@ -1,8 +1,10 @@
 import hashlib
 import json
 from datetime import date
+
 from core.ml.shared.enums import CustomerState, RiskDirection, TrustDirection
 from core.ml.shared.types import FeatureSnapshotDTO
+
 
 class SnapshotValidationError(ValueError):
     """Raised when feature snapshot validation fails."""
@@ -51,20 +53,20 @@ def validate_snapshot(dto: FeatureSnapshotDTO) -> None:
         try:
             CustomerState(dto.current_state)
         except ValueError:
-            raise SnapshotValidationError(f"Invalid current_state: {dto.current_state}")
+            raise SnapshotValidationError(f"Invalid current_state: {dto.current_state}") from None
 
     # 6. Directions check
     if dto.risk_direction is not None:
         try:
             RiskDirection(dto.risk_direction)
         except ValueError:
-            raise SnapshotValidationError(f"Invalid risk_direction: {dto.risk_direction}")
+            raise SnapshotValidationError(f"Invalid risk_direction: {dto.risk_direction}") from None
 
     if dto.trust_direction is not None:
         try:
             TrustDirection(dto.trust_direction)
         except ValueError:
-            raise SnapshotValidationError(f"Invalid trust_direction: {dto.trust_direction}")
+            raise SnapshotValidationError(f"Invalid trust_direction: {dto.trust_direction}") from None
 
     # 7. Hash verification
     expected_hash = compute_feature_hash(dto.customer_id, dto.snapshot_date, dto.feature_payload_json)

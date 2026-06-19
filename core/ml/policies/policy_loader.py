@@ -1,6 +1,9 @@
-from typing import Dict, Any
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.ml.policies.policy_repository import PolicyRepository
+
 
 async def seed_default_policies(session: AsyncSession):
     repo = PolicyRepository(session)
@@ -28,7 +31,7 @@ async def seed_default_policies(session: AsyncSession):
         
         await session.commit()
 
-async def load_active_policies(session: AsyncSession, profile_name: str = "default") -> Dict[str, Any]:
+async def load_active_policies(session: AsyncSession, profile_name: str = "default") -> dict[str, Any]:
     repo = PolicyRepository(session)
     # Ensure seeded
     await seed_default_policies(session)

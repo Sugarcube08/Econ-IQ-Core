@@ -1,15 +1,16 @@
 import asyncio
-import sys
 import gc
 import resource
 import time
-from datetime import date, datetime, UTC
+from datetime import date
 
-from sqlalchemy import select, func
-from core.storage.postgres import AsyncSessionLocal
-from core.models.state_models import CustomerIntelligence, FeatureSnapshot
+from sqlalchemy import func, select
+
 from core.ml.features.feature_snapshot import generate_all_feature_snapshots
 from core.ml.shared.enums import SnapshotSource
+from core.models.state_models import FeatureSnapshot
+from core.storage.postgres import AsyncSessionLocal
+
 
 def get_memory_usage_mb() -> float:
     # ru_maxrss is in kilobytes on Linux

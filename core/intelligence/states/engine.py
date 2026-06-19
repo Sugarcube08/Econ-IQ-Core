@@ -1,5 +1,4 @@
 import polars as pl
-from loguru import logger
 
 from core.schemas.intelligence import AnalysisContext
 

@@ -1,5 +1,7 @@
 import threading
+
 from loguru import logger
+
 
 class FailureRegistry:
     _lock = threading.Lock()

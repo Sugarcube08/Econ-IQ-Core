@@ -1,6 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.models.state_models import FeatureSnapshot, CustomerPrediction, PredictionOutcome
+
+from core.models.state_models import CustomerPrediction, FeatureSnapshot, PredictionOutcome
+
 
 class DatasetRepository:
     def __init__(self, session: AsyncSession):

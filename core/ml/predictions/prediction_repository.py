@@ -1,10 +1,12 @@
 from datetime import datetime
-from typing import List, Optional
+
 from loguru import logger
-from sqlalchemy import select, and_, update
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.models.state_models import CustomerPrediction
+
 from core.ml.predictions.prediction_types import CustomerPredictionDTO, PredictionStatus
+from core.models.state_models import CustomerPrediction
+
 
 class PredictionRepository:
     """
@@ -35,7 +37,7 @@ class PredictionRepository:
         logger.debug(f"ML | Prediction Saved: {dto.prediction_id} for Customer {dto.customer_id}")
         return dto
 
-    async def get_prediction(self, prediction_id: str) -> Optional[CustomerPredictionDTO]:
+    async def get_prediction(self, prediction_id: str) -> CustomerPredictionDTO | None:
         """Retrieves a prediction by its primary key ID."""
         stmt = select(CustomerPrediction).where(CustomerPrediction.prediction_id == prediction_id)
         res = await self.db.execute(stmt)
@@ -44,7 +46,7 @@ class PredictionRepository:
             return None
         return CustomerPredictionDTO.model_validate(model)
 
-    async def get_customer_predictions(self, customer_id: str) -> List[CustomerPredictionDTO]:
+    async def get_customer_predictions(self, customer_id: str) -> list[CustomerPredictionDTO]:
         """Retrieves all predictions for a customer ordered by generated_at descending."""
         stmt = (
             select(CustomerPrediction)
@@ -55,14 +57,14 @@ class PredictionRepository:
         models = res.scalars().all()
         return [CustomerPredictionDTO.model_validate(m) for m in models]
 
-    async def get_pending_predictions(self) -> List[CustomerPredictionDTO]:
+    async def get_pending_predictions(self) -> list[CustomerPredictionDTO]:
         """Retrieves all pending predictions."""
         stmt = select(CustomerPrediction).where(CustomerPrediction.prediction_status == PredictionStatus.PENDING.value)
         res = await self.db.execute(stmt)
         models = res.scalars().all()
         return [CustomerPredictionDTO.model_validate(m) for m in models]
 
-    async def mark_prediction_resolved(self, prediction_id: str, actual_label: str, resolved_at: datetime) -> Optional[CustomerPredictionDTO]:
+    async def mark_prediction_resolved(self, prediction_id: str, actual_label: str, resolved_at: datetime) -> CustomerPredictionDTO | None:
         """Resolves a pending prediction with actual outcome label."""
         stmt = select(CustomerPrediction).where(CustomerPrediction.prediction_id == prediction_id)
         res = await self.db.execute(stmt)
@@ -75,7 +77,7 @@ class PredictionRepository:
             return CustomerPredictionDTO.model_validate(model)
         return None
 
-    async def bulk_insert_predictions(self, dtos: List[CustomerPredictionDTO]) -> List[CustomerPredictionDTO]:
+    async def bulk_insert_predictions(self, dtos: list[CustomerPredictionDTO]) -> list[CustomerPredictionDTO]:
         """Inserts multiple predictions in bulk."""
         for dto in dtos:
             await self.insert_prediction(dto)

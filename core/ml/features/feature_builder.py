@@ -1,24 +1,23 @@
 import uuid
-from datetime import date, datetime, UTC, timedelta
-from typing import Optional, Dict, Any
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 import polars as pl
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.intelligence.settlement.engine import SettlementMatchingEngine
+from core.ml.features.feature_validator import compute_feature_hash
+from core.ml.shared.enums import CustomerArchetype, CustomerState, RiskDirection, SnapshotSource, TrustDirection
+from core.ml.shared.types import FeatureSnapshotDTO
 from core.models.state_models import (
-    CustomerIntelligence,
-    EventLedger,
     Alert,
     CollectionActivity,
+    CustomerIntelligence,
+    DecisionAudit,
+    EventLedger,
     PaymentCommitment,
     Recommendation,
-    DecisionAudit,
 )
-from core.ml.shared.types import FeatureSnapshotDTO
-from core.ml.shared.enums import SnapshotSource, CustomerState, RiskDirection, TrustDirection, CustomerArchetype
-from core.ml.features.feature_validator import compute_feature_hash
-from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.schemas.intelligence import AnalysisContext
 from core.storage.postgres import get_reflected_table
 
@@ -35,7 +34,7 @@ class FeatureBuilder:
     async def build_snapshot(
         self,
         customer_id: str,
-        snapshot_date: Optional[date] = None,
+        snapshot_date: date | None = None,
         snapshot_source: SnapshotSource = SnapshotSource.BATCH
     ) -> FeatureSnapshotDTO:
         """
@@ -54,7 +53,7 @@ class FeatureBuilder:
             and_(
                 EventLedger.customer_id == customer_id,
                 EventLedger.event_date <= snapshot_date,
-                EventLedger.is_voided == False
+                not EventLedger.is_voided
             )
         ).order_by(EventLedger.event_date.asc(), EventLedger.global_sequence_number.asc())
         res_events = await self.db.execute(stmt_events)

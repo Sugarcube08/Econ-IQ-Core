@@ -1,15 +1,16 @@
 import uuid
-from datetime import datetime, UTC
-from typing import List, Dict, Tuple
+from datetime import UTC, datetime
+
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models.state_models import PredictionOutcome, CustomerPrediction
-from core.ml.feedback.feedback_repository import FeedbackRepository, PredictionFeedbackDTO
 from core.ml.feedback.feedback_metrics import compute_binary_metrics
+from core.ml.feedback.feedback_repository import FeedbackRepository, PredictionFeedbackDTO
+from core.models.state_models import CustomerPrediction, PredictionOutcome
 
-async def calculate_and_persist_feedback_metrics(session: AsyncSession) -> List[PredictionFeedbackDTO]:
+
+async def calculate_and_persist_feedback_metrics(session: AsyncSession) -> list[PredictionFeedbackDTO]:
     """
     Retrieves all evaluated outcomes, groups them by model and prediction type,
     calculates classification metrics, and persists the feedback reports.
@@ -25,7 +26,7 @@ async def calculate_and_persist_feedback_metrics(session: AsyncSession) -> List[
     rows = res.all()
 
     # Group outcomes by (model_id, prediction_type)
-    groups: Dict[Tuple[str, str], List[PredictionOutcome]] = {}
+    groups: dict[tuple[str, str], list[PredictionOutcome]] = {}
     for outcome, model_id in rows:
         key = (model_id, outcome.prediction_type)
         if key not in groups:

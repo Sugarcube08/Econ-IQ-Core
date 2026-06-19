@@ -1,5 +1,7 @@
 from typing import Any
+
 from core.prediction.interfaces.estimator import IPredictionMonitor
+
 
 class PredictionMonitor(IPredictionMonitor):
     """

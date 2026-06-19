@@ -1,10 +1,9 @@
 from typing import Optional
 
 import redis.asyncio as redis
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 
 from core.config.settings import settings
+from core.observability.failure_registry import FailureRegistry
 
 
 class RedisManager:

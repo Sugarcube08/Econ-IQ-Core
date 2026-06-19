@@ -1,29 +1,48 @@
 import uuid
-from datetime import date, datetime, UTC, timedelta
-from typing import List, Optional
-from loguru import logger
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-import polars as pl
+from datetime import UTC, date, datetime, timedelta
 
+import polars as pl
+from loguru import logger
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.intelligence.settlement.engine import SettlementMatchingEngine
+from core.ml.outcomes.outcome_repository import OutcomeRepository, PredictionOutcomeDTO
+from core.ml.predictions.prediction_repository import PredictionRepository
+from core.ml.predictions.prediction_types import PredictionType
 from core.models.state_models import (
     CustomerIntelligence,
     EventLedger,
     PaymentCommitment,
-    CustomerPrediction,
 )
-from core.ml.predictions.prediction_types import PredictionType, PredictionStatus
-from core.ml.predictions.prediction_repository import PredictionRepository
-from core.ml.outcomes.outcome_repository import OutcomeRepository, PredictionOutcomeDTO
-from core.intelligence.settlement.engine import SettlementMatchingEngine
 from core.schemas.intelligence import AnalysisContext
 
+
 async def get_customer_state_at(customer_id: str, target_date: date, session: AsyncSession) -> str:
-    """Retrieves the current state of a customer from CustomerIntelligence."""
-    stmt = select(CustomerIntelligence.current_state).where(CustomerIntelligence.customer_id == customer_id)
+    """Retrieves the state of a customer from CustomerStateHistory as of target_date, falling back to CustomerIntelligence."""
+    from core.models.state_models import CustomerStateHistory
+    
+    stmt = (
+        select(CustomerStateHistory.state)
+        .where(
+            and_(
+                CustomerStateHistory.customer_id == customer_id,
+                CustomerStateHistory.snapshot_date <= target_date
+            )
+        )
+        .order_by(CustomerStateHistory.snapshot_date.desc(), CustomerStateHistory.created_at.desc())
+        .limit(1)
+    )
     res = await session.execute(stmt)
     state = res.scalar()
-    return state or "healthy"
+    if state is not None:
+        return state
+        
+    # Fallback if no history is recorded yet for target_date
+    stmt_ci = select(CustomerIntelligence.current_state).where(CustomerIntelligence.customer_id == customer_id)
+    res_ci = await session.execute(stmt_ci)
+    ci_state = res_ci.scalar()
+    return ci_state or "healthy"
 
 async def resolve_churn(customer_id: str, prediction_date: date, evaluation_date: date, session: AsyncSession) -> float:
     """Churn: 1.0 if no SALE events occurred in the tracking window after prediction date, else 0.0."""
@@ -33,7 +52,7 @@ async def resolve_churn(customer_id: str, prediction_date: date, evaluation_date
             EventLedger.event_type == 'SALE',
             EventLedger.event_date > prediction_date,
             EventLedger.event_date <= evaluation_date,
-            EventLedger.is_voided == False
+            not EventLedger.is_voided
         )
     )
     res = await session.execute(stmt)
@@ -63,7 +82,7 @@ async def resolve_delinquency(customer_id: str, prediction_date: date, evaluatio
         and_(
             EventLedger.customer_id == customer_id,
             EventLedger.event_date <= evaluation_date,
-            EventLedger.is_voided == False
+            not EventLedger.is_voided
         )
     ).order_by(EventLedger.event_date.asc(), EventLedger.global_sequence_number.asc())
     res_events = await session.execute(stmt_events)
@@ -109,7 +128,7 @@ async def resolve_transition(customer_id: str, prediction_date: date, evaluation
     return 1.0 if state != baseline_state else 0.0
 
 
-async def evaluate_pending_predictions(session: AsyncSession) -> List[PredictionOutcomeDTO]:
+async def evaluate_pending_predictions(session: AsyncSession) -> list[PredictionOutcomeDTO]:
     """
     Scans for PENDING predictions whose horizon has passed, resolves the actual outcomes,
     persists them to the database, and marks the predictions as RESOLVED.

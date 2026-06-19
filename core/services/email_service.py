@@ -3,10 +3,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import aiosmtplib
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 
 from core.config.settings import settings
+from core.observability.failure_registry import FailureRegistry
 
 
 class EmailService:
@@ -22,7 +21,6 @@ class EmailService:
         Sends an email using aiosmtplib with production hardening.
         Includes retries, timeouts, and proper MIME structure.
         """
-        log_ctx = f"[Correlation: {correlation_id}] " if correlation_id else ""
         
         if not settings.SMTP_HOST:
             FailureRegistry.record("EMAIL_SMTP_UNCONFIGURED", "SMTP_HOST not configured. Skipping email send", "WARNING", extra={"correlation_id": correlation_id})

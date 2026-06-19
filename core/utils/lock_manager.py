@@ -1,12 +1,11 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models.state_models import SyncLock
+from core.observability.failure_registry import FailureRegistry
 
 
 class MDBLockManager:

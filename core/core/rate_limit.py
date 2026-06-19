@@ -1,9 +1,9 @@
 import time
 
 from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 
 from core.config.settings import settings
+from core.observability.failure_registry import FailureRegistry
 from core.storage.redis import redis_manager
 from core.utils.ip import parse_rate_limit
 

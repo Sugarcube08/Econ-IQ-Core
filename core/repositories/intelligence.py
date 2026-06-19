@@ -3,12 +3,11 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import desc, func, not_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models.state_models import CustomerIntelligence, EventLedger
+from core.observability.failure_registry import FailureRegistry
 
 # Global thread-safe/async-safe TTL caches for organization-wide metrics
 _org_metrics_cache = {}

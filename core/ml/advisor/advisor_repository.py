@@ -1,6 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.models.state_models import CustomerIntelligence
+
 
 class AdvisorRepository:
     """

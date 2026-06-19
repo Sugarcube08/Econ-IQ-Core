@@ -1,4 +1,4 @@
-from .enums import CustomerState, RiskDirection, TrustDirection, CustomerArchetype, SnapshotSource
+from .enums import CustomerArchetype, CustomerState, RiskDirection, SnapshotSource, TrustDirection
 from .types import FeatureSnapshotDTO
 
 __all__ = [

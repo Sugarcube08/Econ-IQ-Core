@@ -1,10 +1,12 @@
 from datetime import datetime
-from typing import List, Optional, Any, Dict
-from pydantic import BaseModel, ConfigDict, Field
+
+from loguru import logger
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.models.state_models import PredictionFeedback
-from loguru import logger
+
 
 class PredictionFeedbackDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -50,7 +52,7 @@ class FeedbackRepository:
         logger.debug(f"ML | Feedback Saved: {dto.feedback_id} for Model {dto.model_id}")
         return dto
 
-    async def get_latest_feedback(self, model_id: str, prediction_type: str) -> Optional[PredictionFeedbackDTO]:
+    async def get_latest_feedback(self, model_id: str, prediction_type: str) -> PredictionFeedbackDTO | None:
         """Retrieves the latest feedback entry for a model and prediction type."""
         stmt = (
             select(PredictionFeedback)
@@ -67,7 +69,7 @@ class FeedbackRepository:
             return None
         return PredictionFeedbackDTO.model_validate(model)
 
-    async def get_feedback_history(self, prediction_type: str) -> List[PredictionFeedbackDTO]:
+    async def get_feedback_history(self, prediction_type: str) -> list[PredictionFeedbackDTO]:
         """Retrieves the history of feedback entries for a prediction type ordered by created_at descending."""
         stmt = (
             select(PredictionFeedback)

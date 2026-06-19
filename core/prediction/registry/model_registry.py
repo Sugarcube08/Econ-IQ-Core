@@ -1,4 +1,3 @@
-from loguru import logger
 
 from core.prediction.interfaces.estimator import IModelEstimator, IModelRegistry
 

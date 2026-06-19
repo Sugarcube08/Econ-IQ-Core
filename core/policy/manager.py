@@ -1,9 +1,8 @@
 import os
 
 import yaml
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 
+from core.observability.failure_registry import FailureRegistry
 from core.policy.models import EconiqPolicy
 
 

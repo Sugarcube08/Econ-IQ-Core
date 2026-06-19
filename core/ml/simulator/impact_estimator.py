@@ -1,4 +1,5 @@
-from typing import Dict, Any
+from typing import Any
+
 
 class ActionImpactEstimator:
     """
@@ -55,7 +56,7 @@ class ActionImpactEstimator:
         }
     }
 
-    def apply_actions(self, original_features: Dict[str, Any], actions: list[str]) -> Dict[str, Any]:
+    def apply_actions(self, original_features: dict[str, Any], actions: list[str]) -> dict[str, Any]:
         """
         Applies a list of actions sequentially to original features, producing simulated features.
         """

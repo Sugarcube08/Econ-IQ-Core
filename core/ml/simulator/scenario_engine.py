@@ -1,5 +1,6 @@
 from core.ml.simulator.simulator import CounterfactualSimulator
 
+
 class ScenarioEngine:
     """
     Manages execution of multi-scenario simulations and counterfactual scoring.

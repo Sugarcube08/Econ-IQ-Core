@@ -2,12 +2,12 @@ import asyncio
 import gc
 
 from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import String, select
 
 from core.config.settings import settings
 from core.intelligence.orchestrator import IntelligenceOrchestrator
 from core.models.state_models import CustomerIntelligence
+from core.observability.failure_registry import FailureRegistry
 from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 
 PROCESSED_CUSTOMERS_COUNT = 0

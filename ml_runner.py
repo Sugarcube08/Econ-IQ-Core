@@ -1,13 +1,17 @@
 import asyncio
 import sys
+
 from loguru import logger
+
 from core.ml.prediction_service import MLPredictionService
+
 
 async def main():
     # If no customer ID is passed, run a demo with a query
     if len(sys.argv) < 2:
         # Fetch a customer ID from the database for demo
         from sqlalchemy import text
+
         from core.storage.postgres import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             res = await session.execute(text("SELECT customer_id FROM customer_intelligence LIMIT 1"))

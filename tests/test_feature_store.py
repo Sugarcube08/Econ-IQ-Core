@@ -1,25 +1,24 @@
-import pytest
-from datetime import UTC, date, datetime, timedelta
 import uuid
+from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from sqlalchemy import delete, select
-from core.storage.postgres import AsyncSessionLocal, get_reflected_table
-from core.models.state_models import (
-    CustomerIntelligence,
-    EventLedger,
-    Alert,
-    CollectionActivity,
-    PaymentCommitment,
-    Recommendation,
-    DecisionAudit,
-    FeatureSnapshot,
-)
-from core.ml.shared.enums import SnapshotSource, CustomerState, RiskDirection, TrustDirection, CustomerArchetype
-from core.ml.shared.types import FeatureSnapshotDTO
+
 from core.ml.features.feature_builder import FeatureBuilder
 from core.ml.features.feature_repository import FeatureRepository
-from core.ml.features.feature_validator import validate_snapshot, compute_feature_hash, SnapshotValidationError
 from core.ml.features.feature_snapshot import generate_snapshot
+from core.ml.features.feature_validator import SnapshotValidationError, validate_snapshot
+from core.models.state_models import (
+    Alert,
+    CollectionActivity,
+    CustomerIntelligence,
+    DecisionAudit,
+    EventLedger,
+    FeatureSnapshot,
+    PaymentCommitment,
+    Recommendation,
+)
+from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 
 TEST_CUST_ID = "11111111-1111-1111-1111-111111111111"
 

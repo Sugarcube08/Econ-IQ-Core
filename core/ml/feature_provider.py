@@ -1,14 +1,17 @@
-from typing import Any, Dict
+from typing import Any
+
 from sqlalchemy import select
-from core.storage.postgres import AsyncSessionLocal
-from core.models.state_models import CustomerIntelligence
+
 from core.ml.interfaces import IFeatureProvider
+from core.models.state_models import CustomerIntelligence
+from core.storage.postgres import AsyncSessionLocal
+
 
 class MLFeatureProvider(IFeatureProvider):
     """
     Exposes features for ML inference from customer intelligence database.
     """
-    async def get_features(self, customer_id: str) -> Dict[str, Any]:
+    async def get_features(self, customer_id: str) -> dict[str, Any]:
         """
         Retrieves feature snapshot for a customer.
         """

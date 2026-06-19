@@ -1,6 +1,7 @@
 import polars as pl
 from loguru import logger
 
+
 class DatasetValidationError(ValueError):
     """Raised when dataset validation checks fail."""
     pass

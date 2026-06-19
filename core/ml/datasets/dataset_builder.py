@@ -1,8 +1,9 @@
-import os
 import polars as pl
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.ml.datasets.dataset_repository import DatasetRepository
 from core.ml.datasets.dataset_validator import validate_dataset
+
 
 async def build_training_dataset(session: AsyncSession, output_path: str = "training_dataset.parquet") -> tuple[pl.DataFrame, dict]:
     """

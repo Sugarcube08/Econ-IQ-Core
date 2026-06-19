@@ -1,4 +1,4 @@
-from .outcome_repository import PredictionOutcomeDTO, OutcomeRepository
+from .outcome_repository import OutcomeRepository, PredictionOutcomeDTO
 from .outcome_service import evaluate_pending_predictions
 
 __all__ = [

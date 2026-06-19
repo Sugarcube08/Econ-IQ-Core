@@ -1,11 +1,13 @@
 import os
 import pickle
+
 import pandas as pd
-from typing import Dict, Any
+
 from core.ml.explainability.explanation_repository import ExplanationRepository
 from core.ml.simulator.impact_estimator import ActionImpactEstimator
 
-class CounterfactualSimulator:
+
+class CounterfactualHeuristicSimulatorV1:
     """
     Executes what-if impact scenarios by applying dynamic feature shifts
     and running them through XGBoost distress model inference.
@@ -48,7 +50,8 @@ class CounterfactualSimulator:
             "delta": {
                 "distress": round(simulated_distress - current_distress, 4),
                 "health": round(simulated_health - current_health, 4)
-            }
+            },
+            "simulation_source": "HEURISTIC"
         }
 
     def _predict_distress(self, features: dict) -> float:
@@ -82,3 +85,7 @@ class CounterfactualSimulator:
         except Exception:
             risk = features.get("risk_score", 0.5)
             return max(0.0, min(1.0, risk / 0.70))
+
+# Alias for backward compatibility
+CounterfactualSimulator = CounterfactualHeuristicSimulatorV1
+

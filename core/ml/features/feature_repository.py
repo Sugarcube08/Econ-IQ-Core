@@ -1,11 +1,12 @@
 from datetime import date
-from typing import List, Optional
+
 from loguru import logger
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.models.state_models import FeatureSnapshot
+
 from core.ml.shared.types import FeatureSnapshotDTO
-from core.ml.shared.enums import CustomerState, RiskDirection, TrustDirection, CustomerArchetype, SnapshotSource
+from core.models.state_models import FeatureSnapshot
+
 
 class FeatureRepository:
     """
@@ -75,7 +76,7 @@ class FeatureRepository:
         logger.info("ML | Feature Snapshot Inserted", extra={"customer_id": dto.customer_id, "snapshot_id": dto.snapshot_id})
         return dto
 
-    async def get_latest_snapshot(self, customer_id: str) -> Optional[FeatureSnapshotDTO]:
+    async def get_latest_snapshot(self, customer_id: str) -> FeatureSnapshotDTO | None:
         """
         Retrieves the latest feature snapshot for a customer.
         """
@@ -91,7 +92,7 @@ class FeatureRepository:
             return None
         return FeatureSnapshotDTO.model_validate(model)
 
-    async def get_customer_snapshots(self, customer_id: str) -> List[FeatureSnapshotDTO]:
+    async def get_customer_snapshots(self, customer_id: str) -> list[FeatureSnapshotDTO]:
         """
         Retrieves all feature snapshots for a customer.
         """

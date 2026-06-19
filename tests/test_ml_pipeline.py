@@ -1,26 +1,25 @@
-import pytest
 from datetime import UTC, date, datetime, timedelta
-import uuid
 
-from sqlalchemy import delete, select
-from core.storage.postgres import AsyncSessionLocal, get_reflected_table
+import pytest
+from sqlalchemy import delete
+
+from core.ml.feedback.feedback_repository import FeedbackRepository
+from core.ml.feedback.feedback_service import calculate_and_persist_feedback_metrics
+from core.ml.outcomes.outcome_repository import OutcomeRepository
+from core.ml.outcomes.outcome_service import evaluate_pending_predictions
+from core.ml.predictions.prediction_repository import PredictionRepository
+from core.ml.predictions.prediction_service import generate_predictions_for_snapshot
+from core.ml.predictions.prediction_types import PredictionStatus, PredictionType
+from core.ml.shared.enums import SnapshotSource
 from core.models.state_models import (
     CustomerIntelligence,
+    CustomerPrediction,
     EventLedger,
     FeatureSnapshot,
-    CustomerPrediction,
-    PredictionOutcome,
     PredictionFeedback,
+    PredictionOutcome,
 )
-from core.ml.shared.enums import SnapshotSource
-from core.ml.predictions.prediction_types import CustomerPredictionDTO, PredictionType, PredictionStatus
-from core.ml.predictions.prediction_repository import PredictionRepository
-from core.ml.predictions.prediction_registry import prediction_registry
-from core.ml.predictions.prediction_service import generate_predictions_for_snapshot
-from core.ml.outcomes.outcome_repository import OutcomeRepository, PredictionOutcomeDTO
-from core.ml.outcomes.outcome_service import evaluate_pending_predictions
-from core.ml.feedback.feedback_repository import FeedbackRepository, PredictionFeedbackDTO
-from core.ml.feedback.feedback_service import calculate_and_persist_feedback_metrics
+from core.storage.postgres import AsyncSessionLocal, get_reflected_table
 
 TEST_CUST_ID = "22222222-2222-2222-2222-222222222222"
 

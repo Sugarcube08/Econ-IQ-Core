@@ -1,9 +1,10 @@
 import os
 import pickle
+
 import pandas as pd
-import numpy as np
 import shap
 from loguru import logger
+
 
 class SHAPService:
     """
@@ -80,7 +81,7 @@ class SHAPService:
             
             # Map features to attributions
             feature_impacts = {}
-            for col, val in zip(feature_cols, attributions):
+            for col, val in zip(feature_cols, attributions, strict=False):
                 mapped_name = FACTOR_MAPPING.get(col, col)
                 # Keep the max absolute impact if multiple features map to the same name
                 abs_val = abs(float(val))

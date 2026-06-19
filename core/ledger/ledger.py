@@ -1,11 +1,10 @@
 import polars as pl
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config.settings import settings
 from core.models.state_models import EventLedger
+from core.observability.failure_registry import FailureRegistry
 
 
 class LedgerService:

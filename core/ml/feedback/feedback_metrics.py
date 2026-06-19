@@ -1,6 +1,7 @@
-from typing import List, Dict, Any, Tuple
+from typing import Any
 
-def compute_binary_metrics(y_true: List[float], y_prob: List[float]) -> Dict[str, float]:
+
+def compute_binary_metrics(y_true: list[float], y_prob: list[float]) -> dict[str, float]:
     """
     Computes standard evaluation metrics for binary classifications:
     Accuracy, Precision, Recall, F1, ROC-AUC, Brier Score, and ECE.
@@ -84,7 +85,7 @@ def compute_binary_metrics(y_true: List[float], y_prob: List[float]) -> Dict[str
         "ece": ece
     }
 
-def compute_multiclass_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str, Any]:
+def compute_multiclass_metrics(y_true: list[str], y_pred: list[str]) -> dict[str, Any]:
     """
     Computes evaluation metrics for multiclass predictions:
     Accuracy, Macro-F1, and Confusion Matrix.
@@ -100,7 +101,7 @@ def compute_multiclass_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str
     accuracy = sum(1 for i in range(n) if y_true[i] == y_pred[i]) / n
 
     # Macro F1
-    classes = sorted(list(set(y_true + y_pred)))
+    classes = sorted(set(y_true + y_pred))
     f1_scores = []
     for c in classes:
         # One-vs-rest binary metrics

@@ -1,5 +1,4 @@
 import polars as pl
-from loguru import logger
 
 
 class DisciplineDimensionEngine:

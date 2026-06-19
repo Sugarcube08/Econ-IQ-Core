@@ -1,10 +1,13 @@
-from datetime import date, datetime
-from typing import List, Optional, Any, Dict
+from datetime import date
+from typing import Any
+
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.models.state_models import PredictionOutcome
-from loguru import logger
+
 
 class PredictionOutcomeDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -20,7 +23,7 @@ class PredictionOutcomeDTO(BaseModel):
     lead_time_days: int
     is_correct: bool
     absolute_error: float
-    metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
 
 class OutcomeRepository:
     """
@@ -50,7 +53,7 @@ class OutcomeRepository:
         logger.debug(f"ML | Outcome Saved: {dto.outcome_id} for Prediction {dto.prediction_id}")
         return dto
 
-    async def get_outcome(self, outcome_id: str) -> Optional[PredictionOutcomeDTO]:
+    async def get_outcome(self, outcome_id: str) -> PredictionOutcomeDTO | None:
         """Retrieves an outcome by its primary key ID."""
         stmt = select(PredictionOutcome).where(PredictionOutcome.outcome_id == outcome_id)
         res = await self.db.execute(stmt)
@@ -59,7 +62,7 @@ class OutcomeRepository:
             return None
         return PredictionOutcomeDTO.model_validate(model)
 
-    async def get_prediction_outcome(self, prediction_id: str) -> Optional[PredictionOutcomeDTO]:
+    async def get_prediction_outcome(self, prediction_id: str) -> PredictionOutcomeDTO | None:
         """Retrieves an outcome associated with a prediction ID."""
         stmt = select(PredictionOutcome).where(PredictionOutcome.prediction_id == prediction_id)
         res = await self.db.execute(stmt)
@@ -68,7 +71,7 @@ class OutcomeRepository:
             return None
         return PredictionOutcomeDTO.model_validate(model)
 
-    async def get_customer_outcomes(self, customer_id: str) -> List[PredictionOutcomeDTO]:
+    async def get_customer_outcomes(self, customer_id: str) -> list[PredictionOutcomeDTO]:
         """Retrieves all outcomes for a customer ordered by evaluation_date descending."""
         stmt = (
             select(PredictionOutcome)

@@ -1,21 +1,23 @@
 import gc
-from datetime import date, datetime, UTC
-from typing import Optional, Dict, Any
+from datetime import UTC, date, datetime
+
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.storage.postgres import AsyncSessionLocal
-from core.models.state_models import CustomerIntelligence
+
 from core.ml.features.feature_builder import FeatureBuilder
 from core.ml.features.feature_repository import FeatureRepository
 from core.ml.features.feature_validator import validate_snapshot
 from core.ml.shared.enums import SnapshotSource
 from core.ml.shared.types import FeatureSnapshotDTO
-from loguru import logger
+from core.models.state_models import CustomerIntelligence
+from core.storage.postgres import AsyncSessionLocal
+
 
 async def generate_snapshot(
     customer_id: str,
-    session: Optional[AsyncSession] = None,
-    snapshot_date: Optional[date] = None,
+    session: AsyncSession | None = None,
+    snapshot_date: date | None = None,
     snapshot_source: SnapshotSource = SnapshotSource.BATCH
 ) -> FeatureSnapshotDTO:
     """
@@ -33,22 +35,65 @@ async def generate_snapshot(
 async def _generate_and_persist(
     customer_id: str,
     session: AsyncSession,
-    snapshot_date: Optional[date],
+    snapshot_date: date | None,
     snapshot_source: SnapshotSource
 ) -> FeatureSnapshotDTO:
+    if snapshot_date is None:
+        snapshot_date = datetime.now(UTC).date()
+
+    from sqlalchemy import and_
+
+    from core.models.state_models import CustomerStateHistory, FeatureSnapshot
+
+    repo = FeatureRepository(session)
+    # 1. Deduplicate snapshots (Sprint 3)
+    if await repo.snapshot_exists(customer_id, snapshot_date):
+        stmt = select(FeatureSnapshot).where(
+            and_(
+                FeatureSnapshot.customer_id == customer_id,
+                FeatureSnapshot.snapshot_date == snapshot_date
+            )
+        ).limit(1)
+        res = await session.execute(stmt)
+        existing = res.scalars().first()
+        if existing:
+            logger.info(f"ML | Feature snapshot already exists for {customer_id} on {snapshot_date}. Deduplicating.")
+            return FeatureSnapshotDTO.model_validate(existing)
+
     builder = FeatureBuilder(session)
     dto = await builder.build_snapshot(customer_id, snapshot_date, snapshot_source)
     
     # Validate DTO (raises SnapshotValidationError on invalid data)
     validate_snapshot(dto)
     
-    repo = FeatureRepository(session)
     await repo.insert_snapshot(dto)
+
+    # 2. Persist customer state history (Sprint 1)
+    state_val = dto.current_state.value if hasattr(dto.current_state, "value") and dto.current_state else dto.current_state
+    stmt_hist = select(CustomerStateHistory.history_id).where(
+        and_(
+            CustomerStateHistory.customer_id == customer_id,
+            CustomerStateHistory.snapshot_date == snapshot_date
+        )
+    ).limit(1)
+    res_hist = await session.execute(stmt_hist)
+    if res_hist.scalar() is None:
+        history_record = CustomerStateHistory(
+            customer_id=customer_id,
+            state=state_val or "healthy",
+            risk_score=dto.risk_score,
+            health_score=dto.health_score,
+            trust_score=dto.trust_score,
+            snapshot_date=dto.snapshot_date
+        )
+        session.add(history_record)
+        await session.flush()
+        logger.info(f"ML | CustomerStateHistory persisted for {customer_id} on {dto.snapshot_date}")
     
     return dto
 
 async def generate_all_feature_snapshots(
-    snapshot_date: Optional[date] = None,
+    snapshot_date: date | None = None,
     snapshot_source: SnapshotSource = SnapshotSource.BATCH
 ) -> dict:
     """

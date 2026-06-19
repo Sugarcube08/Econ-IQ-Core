@@ -1,13 +1,15 @@
 import asyncio
 import sys
+
 from loguru import logger
-from core.config.settings import settings
-from core.observability.logger import setup_logging
-from core.storage.redis import redis_manager
+
 from core.ingestion.sync_pipeline import SyncPipeline
 from core.intelligence.background_worker import start_background_worker
-from core.observability.failure_registry import FailureRegistry
 from core.ml.worker import start_ml_worker_loop
+from core.observability.failure_registry import FailureRegistry
+from core.observability.logger import setup_logging
+from core.storage.redis import redis_manager
+
 
 async def start_sync_worker():
     logger.info("WORKER | Starting background event sync worker loop")

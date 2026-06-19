@@ -1,18 +1,21 @@
-from typing import Optional, Dict, Any
+from typing import Any
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.ml.policies.policy_models import MLPolicyProfile, PolicyVersion, PolicyThreshold
+
+from core.ml.policies.policy_models import MLPolicyProfile, PolicyThreshold, PolicyVersion
+
 
 class PolicyRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_profile_by_name(self, name: str) -> Optional[MLPolicyProfile]:
+    async def get_profile_by_name(self, name: str) -> MLPolicyProfile | None:
         stmt = select(MLPolicyProfile).where(MLPolicyProfile.name == name)
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
-    async def create_profile(self, name: str, description: Optional[str] = None) -> MLPolicyProfile:
+    async def create_profile(self, name: str, description: str | None = None) -> MLPolicyProfile:
         profile = MLPolicyProfile(name=name, description=description, is_active=True)
         self.session.add(profile)
         await self.session.flush()
@@ -53,14 +56,14 @@ class PolicyRepository:
             await self.session.flush()
             return thresh
 
-    async def get_active_thresholds_for_profile(self, profile_name: str) -> Dict[str, Any]:
+    async def get_active_thresholds_for_profile(self, profile_name: str) -> dict[str, Any]:
         stmt = (
             select(PolicyThreshold)
             .join(PolicyVersion, PolicyVersion.version_id == PolicyThreshold.version_id)
             .join(MLPolicyProfile, MLPolicyProfile.profile_id == PolicyVersion.profile_id)
             .where(MLPolicyProfile.name == profile_name)
-            .where(PolicyVersion.is_active == True)
-            .where(MLPolicyProfile.is_active == True)
+            .where(PolicyVersion.is_active)
+            .where(MLPolicyProfile.is_active)
         )
         res = await self.session.execute(stmt)
         thresholds = res.scalars().all()

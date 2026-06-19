@@ -2,15 +2,23 @@ import asyncio
 import gc
 import resource
 import time
-from datetime import date, datetime, UTC, timedelta
-from sqlalchemy import select, func, update, delete
-from core.storage.postgres import AsyncSessionLocal
-from core.models.state_models import CustomerIntelligence, FeatureSnapshot, CustomerPrediction, PredictionOutcome, PredictionFeedback
+from datetime import UTC, date, datetime, timedelta
+
+from sqlalchemy import delete, func, select
+
 from core.ml.features.feature_snapshot import generate_all_feature_snapshots
-from core.ml.predictions.prediction_service import generate_predictions_for_snapshot
-from core.ml.outcomes.outcome_service import evaluate_pending_predictions
 from core.ml.feedback.feedback_service import calculate_and_persist_feedback_metrics
+from core.ml.outcomes.outcome_service import evaluate_pending_predictions
+from core.ml.predictions.prediction_service import generate_predictions_for_snapshot
 from core.ml.shared.enums import SnapshotSource
+from core.models.state_models import (
+    CustomerPrediction,
+    FeatureSnapshot,
+    PredictionFeedback,
+    PredictionOutcome,
+)
+from core.storage.postgres import AsyncSessionLocal
+
 
 def get_memory_usage_mb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
@@ -21,13 +29,20 @@ async def main():
     start_memory = get_memory_usage_mb()
     start_time = time.time()
     
+    # 0. Initialize DB schemas (create new tables)
+    from core.storage.postgres import Base, engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     # 1. Clear old predictions, outcomes, and feedback to ensure fresh verification
+    from core.models.state_models import CustomerStateHistory
     async with AsyncSessionLocal() as session:
         async with session.begin():
             await session.execute(delete(PredictionFeedback))
             await session.execute(delete(PredictionOutcome))
             await session.execute(delete(CustomerPrediction))
             await session.execute(delete(FeatureSnapshot))
+            await session.execute(delete(CustomerStateHistory))
             
     # 2. Generate feature snapshots for all 500 customers
     print("ML | Generating 500 feature snapshots...")
@@ -54,11 +69,68 @@ async def main():
     # 4. Backdate predictions to past so outcome resolution triggers
     print("ML | Backdating predictions to trigger outcome resolution...")
     backdate_dt = datetime.now(UTC) - timedelta(days=95)
+    import json
+
+    from sqlalchemy import text
+    
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            # Backdate predictions, snapshots, and customer state history via raw SQL (bypasses ORM event listeners)
             await session.execute(
-                update(CustomerPrediction).values(generated_at=backdate_dt)
+                text("UPDATE customer_predictions SET generated_at = :dt"),
+                {"dt": backdate_dt}
             )
+            await session.execute(
+                text("UPDATE feature_snapshots SET snapshot_date = :dt"),
+                {"dt": backdate_dt.date()}
+            )
+            await session.execute(
+                text("UPDATE customer_state_history SET snapshot_date = :dt"),
+                {"dt": backdate_dt.date()}
+            )
+            
+            # Query snapshots to dynamically modify baseline states (Sprint 2)
+            res_snaps = await session.execute(
+                text("SELECT snapshot_id, current_state, feature_payload_json FROM feature_snapshots")
+            )
+            rows = res_snaps.fetchall()
+            
+            for idx, row in enumerate(rows):
+                snap_id, old_state, payload = row
+                if idx % 7 == 0:
+                    old_state_str = old_state or "healthy"
+                    new_baseline = "distressed" if old_state_str != "distressed" else "healthy"
+                    
+                    # Parse and update payload
+                    if isinstance(payload, str):
+                        payload_dict = json.loads(payload)
+                    else:
+                        payload_dict = dict(payload or {})
+                    payload_dict["current_state"] = new_baseline
+                    
+                    # Update snapshot using raw SQL
+                    await session.execute(
+                        text("UPDATE feature_snapshots SET current_state = :state, feature_payload_json = :payload WHERE snapshot_id = :id"),
+                        {"state": new_baseline, "payload": json.dumps(payload_dict), "id": snap_id}
+                    )
+                    
+                    # Update predictions metadata features to match
+                    res_preds = await session.execute(
+                        text("SELECT prediction_id, metadata_json FROM customer_predictions WHERE snapshot_id = :id AND prediction_type = 'STATE_TRANSITION'"),
+                        {"id": snap_id}
+                    )
+                    pred_rows = res_preds.fetchall()
+                    for pred_id, pred_meta in pred_rows:
+                        if isinstance(pred_meta, str):
+                            meta_dict = json.loads(pred_meta)
+                        else:
+                            meta_dict = dict(pred_meta or {})
+                        meta_dict["features"] = payload_dict
+                        
+                        await session.execute(
+                            text("UPDATE customer_predictions SET metadata_json = :meta WHERE prediction_id = :pred_id"),
+                            {"meta": json.dumps(meta_dict), "pred_id": pred_id}
+                        )
             
     # 5. Run outcome resolution pass
     print("ML | Running outcome resolution pass...")

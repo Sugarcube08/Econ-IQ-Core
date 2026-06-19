@@ -2,10 +2,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import polars as pl
-from loguru import logger
-from core.observability.failure_registry import FailureRegistry
 from sqlalchemy import Table, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.observability.failure_registry import FailureRegistry
 
 
 class DBIngestionProvider:

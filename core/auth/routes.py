@@ -1,7 +1,6 @@
 
 from fastapi import APIRouter, Depends, Request
 
-from core.config.settings import settings
 from core.core.dependencies import get_auth_repo, get_current_user
 from core.core.responses import success_response
 from core.models.auth_models import User

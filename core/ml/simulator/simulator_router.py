@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
-from core.storage.postgres import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.ml.simulator.simulator import CounterfactualSimulator
+from core.storage.postgres import get_db
 
 router = APIRouter(prefix="/ml", tags=["ML Simulation Engine"])
 
@@ -18,6 +19,7 @@ class SimulationResponse(BaseModel):
     current: ScoreState
     simulated: ScoreState
     delta: ScoreState
+    simulation_source: str = "HEURISTIC"
 
 @router.post("/simulate", response_model=SimulationResponse)
 async def simulate_customer_actions(

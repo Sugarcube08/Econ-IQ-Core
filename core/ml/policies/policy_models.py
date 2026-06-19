@@ -1,8 +1,11 @@
 import uuid
-from datetime import datetime, UTC
-from sqlalchemy import String, Boolean, DateTime
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+
 from core.storage.postgres import Base
+
 
 class MLPolicyProfile(Base):
     __tablename__ = "ml_policy_profiles"

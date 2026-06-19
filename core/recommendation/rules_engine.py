@@ -1,7 +1,6 @@
 import uuid
 from datetime import UTC, datetime
 
-from loguru import logger
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

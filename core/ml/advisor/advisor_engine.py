@@ -1,11 +1,11 @@
 import os
 import pickle
+
 import pandas as pd
-from typing import Dict, Any, List
-from sqlalchemy import select
+
 from core.ml.advisor.advisor_repository import AdvisorRepository
 from core.ml.simulator.simulator import CounterfactualSimulator
-from core.models.state_models import PredictionFeedback
+
 
 class AdvisorEngine:
     """
@@ -37,6 +37,7 @@ class AdvisorEngine:
 
         current_distress = self._predict_distress(features)
         current_churn = self._predict_churn(features)
+        recovery_prob = self._predict_recovery(features)
 
         # 3. Optimize recommendations using counterfactual simulator
         candidate_actions = [
@@ -50,26 +51,24 @@ class AdvisorEngine:
             "escalation"
         ]
 
-        # Query latest feedback metrics for confidence values
-        stmt_distress = (
-            select(PredictionFeedback)
-            .where(PredictionFeedback.prediction_type == "DISTRESS")
-            .order_by(PredictionFeedback.created_at.desc())
-            .limit(1)
-        )
-        res_distress = await session.execute(stmt_distress)
-        fb_distress = res_distress.scalar_one_or_none()
-        distress_acc = fb_distress.accuracy if fb_distress else 0.85
+        from core.ml.model_registry.model_registry_repository import ModelRegistryRepository
+        model_repo = ModelRegistryRepository(session)
+        model_meta = await model_repo.get_model_by_name("recovery_v1")
+        if model_meta:
+            model_quality = model_meta.auc
+            prediction_source = "ML"
+        else:
+            model_quality = 0.87
+            prediction_source = "ML" if os.path.exists(os.path.join(self.models_dir, "recovery_v1.pkl")) else "HEURISTIC"
 
-        stmt_delinq = (
-            select(PredictionFeedback)
-            .where(PredictionFeedback.prediction_type == "DELINQUENCY")
-            .order_by(PredictionFeedback.created_at.desc())
-            .limit(1)
-        )
-        res_delinq = await session.execute(stmt_delinq)
-        fb_delinq = res_delinq.scalar_one_or_none()
-        delinq_acc = fb_delinq.accuracy if fb_delinq else 0.74
+        # Phase B Confidence
+        label_quality = 0.85
+        sample_density = 0.90
+        confidence = float(recovery_prob * model_quality * label_quality * sample_density)
+        confidence = round(confidence, 4)
+
+        outstanding_current = float(features.get("outstanding_current", 150000.0) or 150000.0)
+        expected_recovery = float(recovery_prob * outstanding_current)
 
         recommendations = []
         for action in candidate_actions:
@@ -82,29 +81,27 @@ class AdvisorEngine:
             
             # If the action reduces distress risk or improves health score:
             if distress_delta < 0 or health_delta > 0:
-                impact = -distress_delta if distress_delta < 0 else health_delta
-                
-                # Map action to appropriate model accuracy
-                if action in ("collection_campaign", "visit_customer", "escalation"):
-                    confidence = float(delinq_acc)
-                else:
-                    confidence = float(distress_acc)
-                    
                 recommendations.append({
-                    "action": action,
-                    "impact": round(float(impact), 4),
-                    "confidence": round(float(confidence), 4)
+                    "recommendation": action,
+                    "expected_delta_health": round(float(health_delta), 4),
+                    "expected_recovery": round(expected_recovery, 2),
+                    "confidence": round(confidence, 4),
+                    "simulation_source": "HEURISTIC",
+                    "prediction_source": prediction_source,
+                    "model": "recovery_v1",
+                    "label_type": "semi_synthetic"
                 })
 
-        # Sort recommendations by impact descending
-        recommendations = sorted(recommendations, key=lambda r: r["impact"], reverse=True)
+        # Sort recommendations by expected_delta_health descending
+        recommendations = sorted(recommendations, key=lambda r: r["expected_delta_health"], reverse=True)
 
         return {
             "customer_id": customer_id,
             "state": state,
             "predictions": {
                 "distress": round(current_distress, 4),
-                "churn": round(current_churn, 4)
+                "churn": round(current_churn, 4),
+                "recovery": round(recovery_prob, 4)
             },
             "recommendations": recommendations
         }
@@ -116,6 +113,19 @@ class AdvisorEngine:
     def _predict_churn(self, features: dict) -> float:
         model_path = os.path.join(self.models_dir, "churn_v1.pkl")
         return self._run_inference(features, model_path, fallback_col="health_score", fallback_divisor=1.0, invert_fallback=True)
+
+    def _predict_recovery(self, features: dict) -> float:
+        model_path = os.path.join(self.models_dir, "recovery_v1.pkl")
+        if not os.path.exists(model_path):
+            trust = features.get("trust_score", 0.5)
+            if trust is None:
+                trust = 0.5
+            eff = features.get("collection_efficiency", 1.0)
+            if eff is None:
+                eff = 1.0
+            prob = (trust * eff) / 0.65
+            return max(0.0, min(1.0, prob))
+        return self._run_inference(features, model_path, fallback_col="trust_score", fallback_divisor=0.65)
 
     def _run_inference(self, features: dict, model_path: str, fallback_col: str, fallback_divisor: float, invert_fallback: bool = False) -> float:
         feature_cols = [
