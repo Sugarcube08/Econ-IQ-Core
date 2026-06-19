@@ -52,7 +52,7 @@ async def resolve_churn(customer_id: str, prediction_date: date, evaluation_date
             EventLedger.event_type == 'SALE',
             EventLedger.event_date > prediction_date,
             EventLedger.event_date <= evaluation_date,
-            not EventLedger.is_voided
+            EventLedger.is_voided == False
         )
     )
     res = await session.execute(stmt)
@@ -82,7 +82,7 @@ async def resolve_delinquency(customer_id: str, prediction_date: date, evaluatio
         and_(
             EventLedger.customer_id == customer_id,
             EventLedger.event_date <= evaluation_date,
-            not EventLedger.is_voided
+            EventLedger.is_voided == False
         )
     ).order_by(EventLedger.event_date.asc(), EventLedger.global_sequence_number.asc())
     res_events = await session.execute(stmt_events)
