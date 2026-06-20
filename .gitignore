@@ -65,3 +65,4 @@ ref/
 *.txt
 alembic/
 alembic.ini
+docs/
