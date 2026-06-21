@@ -487,6 +487,7 @@ class DashboardRepository:
         credit_limits = {}
         try:
             import uuid
+
             from core.storage.postgres import get_reflected_table
             customers_tbl = await get_reflected_table("customers", self.db)
             if customers_tbl is not None:
@@ -527,6 +528,7 @@ class DashboardRepository:
                 "state": intel.state or "UNKNOWN",
                 "grade": "A" if (intel.trust_score or 0.0) >= 0.70 else "B" if (intel.trust_score or 0.0) >= 0.55 else "C" if (intel.trust_score or 0.0) >= 0.40 else "D",
                 "last_purchased_at": intel.last_purchase_date.isoformat() if intel.last_purchase_date else None,
+                "credit_limit": credit_limits.get(intel.customer_id, 0.0),
             })
         return results
 
@@ -574,6 +576,7 @@ class DashboardRepository:
         credit_limits = {}
         try:
             import uuid
+
             from core.storage.postgres import get_reflected_table
             customers_tbl = await get_reflected_table("customers", self.db)
             if customers_tbl is not None:
@@ -614,6 +617,7 @@ class DashboardRepository:
                 "state": intel.state or "UNKNOWN",
                 "grade": "A" if (intel.trust_score or 0.0) >= 0.70 else "B" if (intel.trust_score or 0.0) >= 0.55 else "C" if (intel.trust_score or 0.0) >= 0.40 else "D",
                 "last_purchased_at": intel.last_purchase_date.isoformat() if intel.last_purchase_date else None,
+                "credit_limit": credit_limits.get(intel.customer_id, 0.0),
             })
         return results
 
@@ -659,6 +663,7 @@ class DashboardRepository:
         credit_limits = {}
         try:
             import uuid
+
             from core.storage.postgres import get_reflected_table
             customers_tbl = await get_reflected_table("customers", self.db)
             if customers_tbl is not None:

@@ -1,14 +1,15 @@
 from typing import Any
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from core.models.state_models import CustomerIntelligence, Recommendation
 
 from core.core.dependencies import require_permissions
 from core.core.permissions import Permission
 from core.core.responses import success_response
 from core.models.auth_models import APIKey, User
+from core.models.state_models import CustomerIntelligence, Recommendation
 from core.recommendation.service import RecommendationService
 from core.schemas.operations import (
     CollectionActivityCreate,
@@ -186,7 +187,7 @@ async def get_collections_activities_endpoint(
     """
     Retrieve logged collections activities.
     """
-    from core.models.state_models import CustomerIntelligence, CollectionActivity
+    from core.models.state_models import CollectionActivity, CustomerIntelligence
     stmt = select(CollectionActivity, CustomerIntelligence.customer_name).outerjoin(
         CustomerIntelligence, CollectionActivity.customer_id == CustomerIntelligence.customer_id
     )

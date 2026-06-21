@@ -53,7 +53,7 @@ class FeatureBuilder:
             and_(
                 EventLedger.customer_id == customer_id,
                 EventLedger.event_date <= snapshot_date,
-                EventLedger.is_voided == False
+                EventLedger.is_voided.is_(False)
             )
         ).order_by(EventLedger.event_date.asc(), EventLedger.global_sequence_number.asc())
         res_events = await self.db.execute(stmt_events)

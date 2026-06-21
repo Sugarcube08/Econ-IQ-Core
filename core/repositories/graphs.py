@@ -1,18 +1,18 @@
 import uuid
-from datetime import UTC, date, datetime, timedelta, time
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 import polars as pl
-from sqlalchemy import select, delete, func, not_
+from sqlalchemy import case, delete, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models.state_models import (
+    Alert,
+    CustomerGraphMV,
+    CustomerIntelligence,
     EventLedger,
     FeatureSnapshot,
-    Alert,
-    CustomerIntelligence,
-    CustomerGraphMV,
-    PortfolioGraphMV
+    PortfolioGraphMV,
 )
 from core.utils.temporal import normalize_temporal_to_date
 
@@ -33,7 +33,7 @@ class GraphRepository:
         opening_stmt = select(
             func.sum(
                 func.coalesce(
-                    EventLedger.amount * func.case(
+                    EventLedger.amount * case(
                         (EventLedger.event_type.in_(["SALE", "OPENING_BALANCE"]), 1.0),
                         else_=-1.0
                     ),
@@ -284,7 +284,7 @@ class GraphRepository:
         opening_stmt = select(
             func.sum(
                 func.coalesce(
-                    EventLedger.amount * func.case(
+                    EventLedger.amount * case(
                         (EventLedger.event_type.in_(["SALE", "OPENING_BALANCE"]), 1.0),
                         else_=-1.0
                     ),

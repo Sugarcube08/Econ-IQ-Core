@@ -36,11 +36,46 @@ async def predict_customer(customer_id: str, db: AsyncSession = Depends(get_db))
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}") from e
 
-@router.get("/customer/{customer_id}/predictions", response_model=list[CustomerPredictionDTO])
+@router.get("/customer/{customer_id}/predictions", response_model=dict)
 async def get_customer_predictions(customer_id: str, db: AsyncSession = Depends(get_db)):
-    """Retrieves prediction history for a customer."""
-    repo = PredictionRepository(db)
-    return await repo.get_customer_predictions(customer_id)
+    """Retrieves formatted prediction cockpit data for a customer."""
+    from sqlalchemy import select
+
+    from core.models.state_models import CustomerPrediction
+    
+    stmt = (
+        select(CustomerPrediction)
+        .where(CustomerPrediction.customer_id == customer_id)
+        .order_by(CustomerPrediction.generated_at.desc())
+    )
+    res = await db.execute(stmt)
+    models = res.scalars().all()
+    
+    latest_by_type = {}
+    for m in models:
+        ptype = m.prediction_type.lower()
+        if ptype not in latest_by_type:
+            latest_by_type[ptype] = m
+            
+    model_keys = ["churn", "delinquency", "distress", "recovery", "state_transition"]
+    predictions_data = []
+    
+    for key in model_keys:
+        m = latest_by_type.get(key)
+        if m:
+            score = m.prediction_value
+            source = m.metadata_json.get("prediction_source", "ML") if m.metadata_json else "ML"
+        else:
+            score = 0.5
+            source = "ML"
+            
+        predictions_data.append({
+            "model": key,
+            "score": round(score, 4),
+            "prediction_source": source
+        })
+        
+    return {"predictions": predictions_data}
 
 @router.get("/pending", response_model=list[CustomerPredictionDTO])
 async def get_pending_predictions(db: AsyncSession = Depends(get_db)):

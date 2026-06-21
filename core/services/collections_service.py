@@ -119,7 +119,7 @@ class CollectionsService:
                 EventLedger.customer_id == customer_id,
                 EventLedger.event_type == "PAYMENT",
                 EventLedger.event_date >= commitment.created_at.date(),
-                EventLedger.is_voided == False
+                EventLedger.is_voided.is_(False)
             )
             pay_res = await db_session.execute(pay_stmt)
             amounts = pay_res.scalars().all()

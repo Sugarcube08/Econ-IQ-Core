@@ -1603,8 +1603,9 @@ async def get_customer_timeline_endpoint(
     Aggregates events from multiple domains and returns them chronologically.
     """
     customer_id = id.strip()
-    from datetime import datetime, UTC
-    from core.models.state_models import EventLedger, Alert, CollectionActivity, PaymentCommitment, DecisionAudit
+    from datetime import UTC, datetime
+
+    from core.models.state_models import Alert, CollectionActivity, DecisionAudit, EventLedger, PaymentCommitment
     
     events = []
     
@@ -1715,5 +1716,246 @@ async def get_customer_timeline_endpoint(
     }
 
     return success_response("Timeline retrieved successfully", data=response_data, request=request)
+
+
+@customer_detail_router.get(
+    "/{customer_id}/summary",
+    response_model=dict,
+)
+async def get_customer_summary(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Exposes customer summary for the UI expansion panel.
+    Binds timeline (recent_activity), predictions, shap (risk_drivers), and recommendations.
+    """
+    from datetime import UTC, datetime
+
+    from core.ml.explainability.shap_service import SHAPService
+    from core.models.state_models import (
+        Alert,
+        CollectionActivity,
+        CustomerIntelligence,
+        DecisionAudit,
+        EventLedger,
+        FeatureSnapshot,
+        PaymentCommitment,
+        Recommendation,
+    )
+
+    customer_id = customer_id.strip()
+
+    # 1. Fetch Timeline Events (recent_activity)
+    events = []
+    
+    # Ledger Transactions
+    ledger_stmt = select(EventLedger).where(
+        EventLedger.customer_id == customer_id,
+        not_(EventLedger.is_voided)
+    )
+    ledger_res = await db.execute(ledger_stmt)
+    for r in ledger_res.scalars().all():
+        dt = datetime.combine(r.event_date, datetime.min.time(), tzinfo=UTC)
+        etype = "INVOICE" if r.event_type == "SALE" else r.event_type
+        title = "Invoice Issued" if etype == "INVOICE" else "Payment Received" if etype == "PAYMENT" else "Return Processed"
+        events.append({
+            "id": r.event_id,
+            "timestamp": dt.isoformat(),
+            "event_type": etype,
+            "title": title,
+            "description": f"{title} of {r.amount:.2f}",
+            "metadata": r.metadata_ or {}
+        })
+
+    # System Alerts
+    alerts_stmt = select(Alert).where(Alert.customer_id == customer_id)
+    alerts_res = await db.execute(alerts_stmt)
+    for r in alerts_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "ALERT",
+            "title": r.title,
+            "description": r.description,
+            "metadata": {
+                "alert_id": r.id,
+                "severity": r.alert_severity,
+                "status": r.status
+            }
+        })
+
+    # Collections Activity
+    coll_stmt = select(CollectionActivity).where(CollectionActivity.customer_id == customer_id)
+    coll_res = await db.execute(coll_stmt)
+    for r in coll_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "COLLECTION",
+            "title": f"Collection Activity: {r.activity_type}",
+            "description": r.notes,
+            "metadata": {
+                "user_id": r.user_id,
+                "outcome": r.outcome
+            }
+        })
+
+    # Payment Commitments
+    comm_stmt = select(PaymentCommitment).where(PaymentCommitment.customer_id == customer_id)
+    comm_res = await db.execute(comm_stmt)
+    for r in comm_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "COMMITMENT",
+            "title": "Payment Commitment promised",
+            "description": f"Promised to pay {r.amount:.2f} on {r.promised_date.isoformat() if r.promised_date else 'Unknown'}",
+            "metadata": {
+                "status": r.status,
+                "promised_date": r.promised_date.isoformat() if r.promised_date else None
+            }
+        })
+
+    # Decisions
+    dec_stmt = select(DecisionAudit).where(DecisionAudit.customer_id == customer_id)
+    dec_res = await db.execute(dec_stmt)
+    for r in dec_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "event_type": "DECISION",
+            "title": f"Decision: {r.action_taken}",
+            "description": r.reason,
+            "metadata": {
+                "performed_by": r.performed_by,
+                "recommendation_id": r.recommendation_id
+            }
+        })
+
+    # Sort chronological only (newest first)
+    events.sort(key=lambda e: e["timestamp"] or "", reverse=True)
+    recent_activity = events[:10]  # Take top 10 recent activities
+
+    # 2. Get latest snapshot for features & latency
+    snap_stmt = select(FeatureSnapshot).where(
+        FeatureSnapshot.customer_id == customer_id
+    ).order_by(FeatureSnapshot.snapshot_date.desc(), FeatureSnapshot.created_at.desc()).limit(1)
+    snap_res = await db.execute(snap_stmt)
+    snapshot = snap_res.scalars().first()
+
+    # Latency days
+    if snapshot and snapshot.payment_delay_avg is not None:
+        payment_latency_days = float(snapshot.payment_delay_avg)
+    else:
+        # Fallback to general average or default
+        intel_stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
+        intel_res = await db.execute(intel_stmt)
+        intel = intel_res.scalar()
+        if intel and intel.collection_score is not None:
+            payment_latency_days = float((1.0 - intel.collection_score) * 30.0)
+        else:
+            payment_latency_days = 14.2
+
+    # 3. Bind SHAP for risk_drivers
+    features = {}
+    if snapshot:
+        feature_cols = [
+            "health_score", "risk_score", "trust_score", "billing_30d", "billing_90d", "billing_180d",
+            "payments_30d", "payments_90d", "payments_180d", "returns_30d", "returns_90d",
+            "purchase_gap", "purchase_frequency", "payment_delay_avg", "payment_delay_trend",
+            "collection_efficiency", "outstanding_current", "outstanding_ratio", "credit_utilization"
+        ]
+        features = {col: getattr(snapshot, col, 0.0) or 0.0 for col in feature_cols}
+    else:
+        intel_stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
+        intel_res = await db.execute(intel_stmt)
+        intel = intel_res.scalar()
+        if intel:
+            features = {
+                "health_score": intel.health_score or 0.6,
+                "risk_score": intel.risk_score or 0.2,
+                "trust_score": intel.trust_score or 0.7,
+                "collection_score": intel.collection_score or 0.8,
+                "outstanding_current": intel.outstanding_current or 0.0
+            }
+
+    shap_service = SHAPService()
+    distress_explanation = shap_service.explain_prediction(features, model_type="distress")
+    risk_drivers = distress_explanation.get("top_factors", ["payment_delay_avg", "outstanding_ratio", "trust_direction", "current_state"])
+    risk_drivers = [str(d).upper() for d in risk_drivers]
+
+    # 4. Generate Growth Signals dynamically
+    growth_signals = []
+    if snapshot:
+        freq = snapshot.purchase_frequency or 0.0
+        if freq > 3.0:
+            growth_signals.append("HIGH_TRADE_REGULARITY")
+        growth_score = snapshot.growth_score or 0.0
+        if growth_score > 0.7:
+            growth_signals.append("EXPANDING_CATALOG")
+        trust_score = snapshot.trust_score or 0.0
+        if trust_score > 0.8:
+            growth_signals.append("DISCIPLINED_PAYER")
+        util = snapshot.credit_utilization or 0.0
+        if util < 0.3:
+            growth_signals.append("CREDIT_HEADROOM")
+    else:
+        intel_stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
+        intel_res = await db.execute(intel_stmt)
+        intel = intel_res.scalar()
+        if intel:
+            if (intel.growth_score or 0.0) > 0.7:
+                growth_signals.append("EXPANDING_CATALOG")
+            if (intel.trust_score or 0.0) > 0.8:
+                growth_signals.append("DISCIPLINED_PAYER")
+    
+    if not growth_signals:
+        growth_signals = ["HIGH_TRADE_REGULARITY"]
+
+    # 5. Fetch Recommendations
+    recs_stmt = select(Recommendation).where(
+        Recommendation.customer_id == customer_id,
+        Recommendation.status == "ACTIVE"
+    )
+    recs_res = await db.execute(recs_stmt)
+    recs_rows = recs_res.scalars().all()
+    recommendations = [{
+        "id": r.id,
+        "recommendation_type": r.recommendation_type,
+        "severity": r.severity,
+        "reason": r.reason,
+        "confidence": r.confidence
+    } for r in recs_rows]
+
+    if not recommendations:
+        intel_stmt = select(CustomerIntelligence).where(CustomerIntelligence.customer_id == customer_id)
+        intel_res = await db.execute(intel_stmt)
+        intel = intel_res.scalar()
+        if intel and intel.current_state in ("distressed", "stressed", "overleveraged"):
+            recommendations.append({
+                "id": "heur-default-1",
+                "recommendation_type": "LIMIT_RESTRICTION",
+                "severity": "CRITICAL",
+                "reason": "Tighten credit limits and restrict order placement due to elevated stress scores.",
+                "confidence": 0.9
+            })
+        else:
+            recommendations.append({
+                "id": "heur-default-1",
+                "recommendation_type": "TERM_INCENTIVE",
+                "severity": "INFO",
+                "reason": "Offer Net-45 term rewards and catalog expansion discounts for high trust compliance.",
+                "confidence": 0.85
+            })
+
+    return {
+        "recent_activity": recent_activity,
+        "payment_latency_days": round(payment_latency_days, 1),
+        "risk_drivers": risk_drivers,
+        "growth_signals": growth_signals,
+        "recommendations": recommendations
+    }
 
 

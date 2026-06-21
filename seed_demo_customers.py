@@ -1,8 +1,10 @@
 import asyncio
 import json
 import uuid
-from datetime import date, datetime, timedelta, UTC
+from datetime import date, timedelta
+
 from sqlalchemy import text
+
 from core.storage.postgres import AsyncSessionLocal
 
 # Define UUID constants

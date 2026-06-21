@@ -10,6 +10,7 @@ from prometheus_client import make_asgi_app
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from core.analytics.routes import router as analytics_router
 from core.auth.api_keys import router as api_keys_router
 from core.auth.routes import router as auth_router
 from core.auth.users import router as users_router
@@ -181,8 +182,6 @@ api_v1_router.include_router(explainability_router)
 api_v1_router.include_router(simulator_router)
 api_v1_router.include_router(advisor_router)
 api_v1_router.include_router(ml_router)
-
-from core.analytics.routes import router as analytics_router
 api_v1_router.include_router(analytics_router)
 
 

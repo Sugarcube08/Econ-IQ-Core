@@ -94,6 +94,7 @@ async def wait_for_db_tables(timeout: int = 30, interval: float = 1.0) -> bool:
     Returns True if the schema is ready, False if the timeout was reached.
     """
     import asyncio
+
     from loguru import logger
     from sqlalchemy import text
 

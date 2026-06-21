@@ -97,7 +97,7 @@ async def run_ml_pipeline_cycle() -> None:
     # Step 6: Train models
     logger.info("ML | Training ML models...")
     try:
-        report = train_and_save_models("training_dataset.parquet", "models")
+        report = await train_and_save_models("training_dataset.parquet", "models")
         logger.info(f"ML | Models trained: {report}")
     except Exception as e:
         logger.error(f"ML | Model training failed: {e}")
