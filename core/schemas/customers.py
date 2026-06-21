@@ -24,6 +24,7 @@ class CustomerDatatableRow(BaseModel):
     # 8 Canonical Scores
     health_score: float | None = 0.0
     risk_score: float | None = 0.0
+    safety_score: float | None = 0.0
     growth_score: float | None = 0.0
     trust_score: float | None = 0.0
     opportunity_score: float | None = 0.0
@@ -70,6 +71,7 @@ class CustomerDatatableResponseData(BaseModel):
 class CustomerScoreSchema(BaseModel):
     health_score: float | None = 0.0
     risk_score: float | None = 0.0
+    safety_score: float | None = 0.0
     growth_score: float | None = 0.0
     trust_score: float | None = 0.0
     opportunity_score: float | None = 0.0

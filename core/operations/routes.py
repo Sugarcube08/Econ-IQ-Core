@@ -1,6 +1,9 @@
+from typing import Any
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from core.models.state_models import CustomerIntelligence, Recommendation
 
 from core.core.dependencies import require_permissions
 from core.core.permissions import Permission
@@ -28,26 +31,38 @@ recommendation_service = RecommendationService()
 
 # --- ALERTS ENDPOINTS ---
 
-@router.get("/alerts", response_model=StandardResponse[list])
+@router.get("/alerts", response_model=StandardResponse[Any])
 async def get_alerts_endpoint(
     request: Request,
+    page: int | None = Query(None, ge=1, description="Page number"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sort_by: str = Query("created_at", description="Field to sort by"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
+    search: str | None = Query(None, description="Fuzzy search by title, description, or customer name"),
     status: str | None = Query("ACTIVE", description="Filter by status (ACTIVE, ACKNOWLEDGED, ARCHIVED)"),
     severity: str | None = Query(None, description="Filter by severity (CRITICAL, WARNING, INFO)"),
     customer_id: str | None = Query(None, description="Filter by customer ID"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
 ):
     """
-    Retrieve list of system alerts.
+    Retrieve list of system alerts. Supports pagination, search, sorting, and name enrichment.
     """
+    is_paginated = (page is not None)
+    calc_offset = offset
+    if is_paginated:
+        calc_offset = (page - 1) * limit
+
     alerts = await alert_service.get_alerts(
         status=status,
         severity=severity,
         customer_id=customer_id,
         limit=limit,
-        offset=offset,
+        offset=calc_offset,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        search=search,
         db_session=db
     )
     # Convert alert model instances to dictionary lists
@@ -57,6 +72,7 @@ async def get_alerts_endpoint(
             "id": a.id,
             "workspace_id": a.workspace_id,
             "customer_id": a.customer_id,
+            "customer_name": getattr(a, "customer_name", "Unknown"),
             "alert_type": a.alert_type,
             "alert_severity": a.alert_severity,
             "title": a.title,
@@ -66,7 +82,27 @@ async def get_alerts_endpoint(
             "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
             "acknowledged_by": a.acknowledged_by
         })
-    return success_response("Alerts retrieved successfully", data=alerts_data, request=request)
+
+    if is_paginated:
+        total = await alert_service.get_alerts_count_filtered(
+            status=status,
+            severity=severity,
+            customer_id=customer_id,
+            search=search,
+            db_session=db
+        )
+        total_pages = (total + limit - 1) // limit if limit > 0 else 0
+        data = {
+            "items": alerts_data,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages
+        }
+    else:
+        data = alerts_data
+
+    return success_response("Alerts retrieved successfully", data=data, request=request)
 
 
 @router.get("/alerts/count", response_model=StandardResponse[dict])
@@ -150,17 +186,24 @@ async def get_collections_activities_endpoint(
     """
     Retrieve logged collections activities.
     """
-    activities = await collections_service.get_activities(
-        customer_id=customer_id,
-        limit=limit,
-        offset=offset,
-        db_session=db
+    from core.models.state_models import CustomerIntelligence, CollectionActivity
+    stmt = select(CollectionActivity, CustomerIntelligence.customer_name).outerjoin(
+        CustomerIntelligence, CollectionActivity.customer_id == CustomerIntelligence.customer_id
     )
+    if customer_id:
+        stmt = stmt.where(CollectionActivity.customer_id == customer_id)
+    stmt = stmt.order_by(desc(CollectionActivity.created_at))
+    stmt = stmt.limit(limit).offset(offset)
+    
+    res = await db.execute(stmt)
+    rows = res.all()
+    
     activities_data = []
-    for a in activities:
+    for a, name in rows:
         activities_data.append({
             "id": a.id,
             "customer_id": a.customer_id,
+            "customer_name": name or "Unknown",
             "user_id": a.user_id,
             "activity_type": a.activity_type,
             "notes": a.notes,
@@ -209,20 +252,28 @@ async def get_collections_commitments_endpoint(
     """
     Retrieve registered payment commitments.
     """
-    commitments = await collections_service.get_commitments(
-        customer_id=customer_id,
-        status=status,
-        db_session=db
+    from core.models.state_models import CustomerIntelligence, PaymentCommitment
+    stmt = select(PaymentCommitment, CustomerIntelligence.customer_name).outerjoin(
+        CustomerIntelligence, PaymentCommitment.customer_id == CustomerIntelligence.customer_id
     )
+    if customer_id:
+        stmt = stmt.where(PaymentCommitment.customer_id == customer_id)
+    if status:
+        stmt = stmt.where(PaymentCommitment.status == status)
+        
+    res = await db.execute(stmt)
+    rows = res.all()
+    
     commitments_data = []
-    for c in commitments:
+    for c, name in rows:
         commitments_data.append({
             "id": c.id,
             "customer_id": c.customer_id,
+            "customer_name": name or "Unknown",
             "amount": c.amount,
-            "promised_date": c.promised_date.isoformat(),
+            "promised_date": c.promised_date.isoformat() if c.promised_date else None,
             "status": c.status,
-            "created_at": c.created_at.isoformat()
+            "created_at": c.created_at.isoformat() if c.created_at else None
         })
     return success_response("Payment commitments retrieved successfully", data=commitments_data, request=request)
 
@@ -272,12 +323,22 @@ async def get_decisions_history_endpoint(
     """
     Retrieve decision history logs.
     """
-    history = await decision_service.get_history(customer_id=customer_id, db_session=db)
+    from core.models.state_models import CustomerIntelligence, DecisionAudit
+    stmt = select(DecisionAudit, CustomerIntelligence.customer_name).outerjoin(
+        CustomerIntelligence, DecisionAudit.customer_id == CustomerIntelligence.customer_id
+    )
+    if customer_id:
+        stmt = stmt.where(DecisionAudit.customer_id == customer_id)
+    stmt = stmt.order_by(desc(DecisionAudit.timestamp))
+    res = await db.execute(stmt)
+    rows = res.all()
+    
     history_data = []
-    for h in history:
+    for h, name in rows:
         history_data.append({
             "id": h.id,
             "customer_id": h.customer_id,
+            "customer_name": name or "Unknown",
             "recommendation_id": h.recommendation_id,
             "action_taken": h.action_taken,
             "performed_by": h.performed_by,
@@ -285,3 +346,108 @@ async def get_decisions_history_endpoint(
             "timestamp": h.timestamp.isoformat()
         })
     return success_response("Decision history retrieved successfully", data=history_data, request=request)
+
+
+@router.get("/recommendations", response_model=StandardResponse[Any])
+async def get_recommendations_endpoint(
+    request: Request,
+    page: int | None = Query(None, ge=1, description="Page number"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None, description="Filter by status"),
+    severity: str | None = Query(None, description="Filter by severity"),
+    customer_id: str | None = Query(None, description="Filter by customer ID"),
+    search: str | None = Query(None, description="Fuzzy search by customer name or reason"),
+    sort_by: str = Query("created_at", description="Field to sort by"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Retrieve list of recommendations. Supports pagination, search, sorting, and name enrichment.
+    """
+    is_paginated = (page is not None)
+    calc_offset = offset
+    if is_paginated:
+        calc_offset = (page - 1) * limit
+
+    # Count Query
+    count_stmt = select(func.count(Recommendation.id)).outerjoin(
+        CustomerIntelligence, Recommendation.customer_id == CustomerIntelligence.customer_id
+    )
+    # Main Query
+    stmt = select(Recommendation, CustomerIntelligence.customer_name).outerjoin(
+        CustomerIntelligence, Recommendation.customer_id == CustomerIntelligence.customer_id
+    )
+
+    # Filters
+    if status:
+        count_stmt = count_stmt.where(Recommendation.status == status)
+        stmt = stmt.where(Recommendation.status == status)
+    if severity:
+        count_stmt = count_stmt.where(Recommendation.severity == severity)
+        stmt = stmt.where(Recommendation.severity == severity)
+    if customer_id:
+        count_stmt = count_stmt.where(Recommendation.customer_id == customer_id)
+        stmt = stmt.where(Recommendation.customer_id == customer_id)
+    if search:
+        search_filter = (
+            (Recommendation.reason.ilike(f"%{search}%")) |
+            (Recommendation.recommendation_type.ilike(f"%{search}%")) |
+            (CustomerIntelligence.customer_name.ilike(f"%{search}%"))
+        )
+        count_stmt = count_stmt.where(search_filter)
+        stmt = stmt.where(search_filter)
+
+    # Sorting
+    sort_mapping = {
+        "created_at": Recommendation.created_at,
+        "severity": Recommendation.severity,
+        "recommendation_type": Recommendation.recommendation_type,
+        "confidence": Recommendation.confidence,
+        "status": Recommendation.status,
+        "customer_name": CustomerIntelligence.customer_name,
+        "customer_id": Recommendation.customer_id,
+    }
+    sort_col = sort_mapping.get(sort_by, Recommendation.created_at)
+    if sort_order == "desc":
+        stmt = stmt.order_by(desc(sort_col))
+    else:
+        stmt = stmt.order_by(asc(sort_col))
+
+    # Pagination execution
+    stmt = stmt.limit(limit).offset(calc_offset)
+    
+    count_res = await db.execute(count_stmt)
+    total = count_res.scalar() or 0
+
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    items = []
+    for rec, name in rows:
+        items.append({
+            "id": rec.id,
+            "customer_id": rec.customer_id,
+            "customer_name": name or "Unknown",
+            "recommendation_type": rec.recommendation_type,
+            "severity": rec.severity,
+            "reason": rec.reason,
+            "confidence": rec.confidence,
+            "status": rec.status,
+            "created_at": rec.created_at.isoformat() if rec.created_at else None
+        })
+
+    if is_paginated:
+        total_pages = (total + limit - 1) // limit if limit > 0 else 0
+        data = {
+            "items": items,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages
+        }
+    else:
+        data = items
+
+    return success_response("Recommendations retrieved successfully", data=data, request=request)

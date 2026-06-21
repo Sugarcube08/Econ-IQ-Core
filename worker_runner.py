@@ -32,6 +32,12 @@ async def main():
     # Connect to Redis
     await redis_manager.connect()
 
+    # Wait for DB schema to be ready
+    from core.storage.postgres import wait_for_db_tables
+    if not await wait_for_db_tables(timeout=30):
+        logger.error("WORKER | Database schema is not ready. Exiting.")
+        sys.exit(1)
+
     # Start background tasks
     sync_task = asyncio.create_task(start_sync_worker())
     worker_task = asyncio.create_task(start_background_worker())

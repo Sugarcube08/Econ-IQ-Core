@@ -68,6 +68,12 @@ class CustomerDeltaInfo(BaseModel):
     state: str | None = Field(..., description="Current behavioral state")
     grade: str | None = Field(..., description="Current overall credit grade classification")
     last_purchased_at: str | None = Field(..., description="ISO 8601 date of the customer's last purchase")
+    risk_score: float | None = Field(None, description="Current risk score (0.0 to 1.0)")
+    safety_score: float | None = Field(None, description="Current safety score (0.0 to 1.0)")
+    average_payment_delay_days: float | None = Field(None, description="Average delay in payment days")
+    payment_delay: float | None = Field(None, description="Average delay in payment days (alias)")
+    days_past_due: int | None = Field(None, description="Days past due")
+    dso: float | None = Field(None, description="Days Sales Outstanding")
 
 
 class HighRiskCustomerInfo(BaseModel):
@@ -82,6 +88,12 @@ class HighRiskCustomerInfo(BaseModel):
     credit_utilization: float | None = Field(..., description="Utilization ratio of allocated credit (outstanding / limit)")
     repayment_health_score: float | None = Field(..., description="Current repayment health index score (0.0 to 1.0)")
     last_purchased_at: str | None = Field(..., description="ISO 8601 date of the customer's last purchase")
+    risk_score: float | None = Field(None, description="Current risk score (0.0 to 1.0)")
+    safety_score: float | None = Field(None, description="Current safety score (0.0 to 1.0)")
+    average_payment_delay_days: float | None = Field(None, description="Average delay in payment days")
+    payment_delay: float | None = Field(None, description="Average delay in payment days (alias)")
+    days_past_due: int | None = Field(None, description="Days past due")
+    dso: float | None = Field(None, description="Days Sales Outstanding")
 
 
 class CustomerActivitySummaryData(BaseModel):

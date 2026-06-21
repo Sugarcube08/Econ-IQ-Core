@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.models.state_models import (
     CustomerIntelligence,
     EventLedger,
+    FeatureSnapshot,
 )
 from core.utils.temporal import normalize_temporal_to_str
 
@@ -445,7 +446,7 @@ class DashboardRepository:
     async def get_deteriorating_customers(self, limit: int = 20) -> list[dict[str, Any]]:
         """
         Fetches top deteriorating customers according to composite deterioration score.
-        Queries ONLY customer_intelligence serving layer.
+        Enriched with safety_score, risk_score, and delay metrics.
         """
         # Composite Deterioration Score (Higher = Worse)
         # Trust Loss (50%) + Collection Deterioration (30%) + Exposure Spike (20%)
@@ -454,34 +455,85 @@ class DashboardRepository:
             -(CustomerIntelligence.collection_score - CustomerIntelligence.collection_previous) * 0.30 +
             (CustomerIntelligence.outstanding_current - CustomerIntelligence.outstanding_previous) / func.nullif(func.abs(CustomerIntelligence.outstanding_previous), 0.0) * 0.20
         ).label("det_score")
- 
-        query = select(
-            CustomerIntelligence,
-            deterioration_score
-        ).order_by(desc("det_score")).limit(limit)
+
+        subq = (
+            select(
+                FeatureSnapshot.customer_id,
+                func.max(FeatureSnapshot.snapshot_date).label("max_date")
+            )
+            .group_by(FeatureSnapshot.customer_id)
+            .subquery()
+        )
+
+        query = (
+            select(
+                CustomerIntelligence,
+                FeatureSnapshot,
+                deterioration_score
+            )
+            .outerjoin(subq, CustomerIntelligence.customer_id == subq.c.customer_id)
+            .outerjoin(
+                FeatureSnapshot,
+                (FeatureSnapshot.customer_id == subq.c.customer_id) &
+                (FeatureSnapshot.snapshot_date == subq.c.max_date)
+            )
+            .order_by(desc("det_score"))
+            .limit(limit)
+        )
         
         res = await self.db.execute(query)
-        
-        return [
-            {
-                "customer_id": r[0].customer_id,
-                "customer_name": r[0].customer_name or r[0].customer_id,
-                "city": r[0].city or "Unknown",
-                "trust_score": round(r[0].trust_score or 0.0, 4),
-                "trust_delta": round((r[0].trust_score or 0.0) - (r[0].trust_previous or 0.0), 4),
-                "payment_delta": round((r[0].collection_score or 0.0) - (r[0].collection_previous or 0.0), 4),
-                "repayment_health_delta": 0.0,
-                "outstanding_delta": round((r[0].outstanding_current or 0.0) - (r[0].outstanding_previous or 0.0), 2),
-                "state": r[0].state or "UNKNOWN",
-                "grade": "A" if (r[0].trust_score or 0.0) >= 0.70 else "B" if (r[0].trust_score or 0.0) >= 0.55 else "C" if (r[0].trust_score or 0.0) >= 0.40 else "D",
-                "last_purchased_at": r[0].last_purchase_date.isoformat() if r[0].last_purchase_date else None,
-            } for r in res.all()
-        ]
- 
+        res_all = res.all()
+
+        credit_limits = {}
+        try:
+            import uuid
+            from core.storage.postgres import get_reflected_table
+            customers_tbl = await get_reflected_table("customers", self.db)
+            if customers_tbl is not None:
+                cust_ids_uuid = [uuid.UUID(r[0].customer_id) for r in res_all]
+                limit_stmt = select(customers_tbl.c.id, customers_tbl.c.credit_limit).where(customers_tbl.c.id.in_(cust_ids_uuid))
+                limit_res = await self.db.execute(limit_stmt)
+                credit_limits = {str(row.id): float(row.credit_limit or 0.0) for row in limit_res.fetchall()}
+        except Exception:
+            pass
+
+        results = []
+        for r in res_all:
+            intel = r[0]
+            snap = r[1]
+            delay_avg = snap.payment_delay_avg if (snap and snap.payment_delay_avg is not None) else 0.0
+            dso = 30.0 + delay_avg
+            
+            results.append({
+                "customer_id": intel.customer_id,
+                "customer_name": intel.customer_name or intel.customer_id,
+                "city": intel.city or "Unknown",
+                "trust_score": round(intel.trust_score or 0.0, 4),
+                "trust_delta": round((intel.trust_score or 0.0) - (intel.trust_previous or 0.0), 4),
+                "payment_delta": round((intel.collection_score or 0.0) - (intel.collection_previous or 0.0), 4),
+                
+                # Risk score and safety score (P1)
+                "risk_score": round(intel.risk_score or 0.0, 4),
+                "safety_score": round(1.0 - (intel.risk_score or 0.0), 4),
+                
+                # Expose delay metrics (P0 / Capability 04)
+                "average_payment_delay_days": delay_avg,
+                "payment_delay": delay_avg,
+                "days_past_due": max(0, int(delay_avg)),
+                "dso": round(dso, 2),
+                
+                "repayment_health_delta": round((intel.collection_score or 0.0) - (intel.collection_previous or 0.0), 4),
+                "outstanding_delta": round((intel.outstanding_current or 0.0) - (intel.outstanding_previous or 0.0), 2),
+                "state": intel.state or "UNKNOWN",
+                "grade": "A" if (intel.trust_score or 0.0) >= 0.70 else "B" if (intel.trust_score or 0.0) >= 0.55 else "C" if (intel.trust_score or 0.0) >= 0.40 else "D",
+                "last_purchased_at": intel.last_purchase_date.isoformat() if intel.last_purchase_date else None,
+            })
+        return results
+
     async def get_improving_customers(self, limit: int = 20) -> list[dict[str, Any]]:
         """
         Fetches top improving customers sorted by largest improvement score.
-        Queries ONLY customer_intelligence serving layer.
+        Enriched with safety_score, risk_score, and delay metrics.
         """
         # Composite Improvement Score (Higher = Better)
         # Trust Increase (50%) + Collection Improvement (30%) + Outstanding Reduction (20%)
@@ -490,60 +542,170 @@ class DashboardRepository:
             (CustomerIntelligence.collection_score - CustomerIntelligence.collection_previous) * 0.30 +
             -(CustomerIntelligence.outstanding_current - CustomerIntelligence.outstanding_previous) / func.nullif(func.abs(CustomerIntelligence.outstanding_previous), 0.0) * 0.20
         ).label("imp_score")
- 
-        query = select(
-            CustomerIntelligence,
-            improvement_score
-        ).order_by(desc("imp_score")).limit(limit)
+
+        subq = (
+            select(
+                FeatureSnapshot.customer_id,
+                func.max(FeatureSnapshot.snapshot_date).label("max_date")
+            )
+            .group_by(FeatureSnapshot.customer_id)
+            .subquery()
+        )
+
+        query = (
+            select(
+                CustomerIntelligence,
+                FeatureSnapshot,
+                improvement_score
+            )
+            .outerjoin(subq, CustomerIntelligence.customer_id == subq.c.customer_id)
+            .outerjoin(
+                FeatureSnapshot,
+                (FeatureSnapshot.customer_id == subq.c.customer_id) &
+                (FeatureSnapshot.snapshot_date == subq.c.max_date)
+            )
+            .order_by(desc("imp_score"))
+            .limit(limit)
+        )
         
         res = await self.db.execute(query)
- 
-        return [
-            {
-                "customer_id": r[0].customer_id,
-                "customer_name": r[0].customer_name or r[0].customer_id,
-                "city": r[0].city or "Unknown",
-                "trust_score": round(r[0].trust_score or 0.0, 4),
-                "trust_delta": round((r[0].trust_score or 0.0) - (r[0].trust_previous or 0.0), 4),
-                "payment_delta": round((r[0].collection_score or 0.0) - (r[0].collection_previous or 0.0), 4),
-                "repayment_health_delta": 0.0,
-                "outstanding_delta": round((r[0].outstanding_current or 0.0) - (r[0].outstanding_previous or 0.0), 2),
-                "state": r[0].state or "UNKNOWN",
-                "grade": "A" if (r[0].trust_score or 0.0) >= 0.70 else "B" if (r[0].trust_score or 0.0) >= 0.55 else "C" if (r[0].trust_score or 0.0) >= 0.40 else "D",
-                "last_purchased_at": r[0].last_purchase_date.isoformat() if r[0].last_purchase_date else None,
-            } for r in res.all()
-        ]
+        res_all = res.all()
+
+        credit_limits = {}
+        try:
+            import uuid
+            from core.storage.postgres import get_reflected_table
+            customers_tbl = await get_reflected_table("customers", self.db)
+            if customers_tbl is not None:
+                cust_ids_uuid = [uuid.UUID(r[0].customer_id) for r in res_all]
+                limit_stmt = select(customers_tbl.c.id, customers_tbl.c.credit_limit).where(customers_tbl.c.id.in_(cust_ids_uuid))
+                limit_res = await self.db.execute(limit_stmt)
+                credit_limits = {str(row.id): float(row.credit_limit or 0.0) for row in limit_res.fetchall()}
+        except Exception:
+            pass
+
+        results = []
+        for r in res_all:
+            intel = r[0]
+            snap = r[1]
+            delay_avg = snap.payment_delay_avg if (snap and snap.payment_delay_avg is not None) else 0.0
+            dso = 30.0 + delay_avg
+            
+            results.append({
+                "customer_id": intel.customer_id,
+                "customer_name": intel.customer_name or intel.customer_id,
+                "city": intel.city or "Unknown",
+                "trust_score": round(intel.trust_score or 0.0, 4),
+                "trust_delta": round((intel.trust_score or 0.0) - (intel.trust_previous or 0.0), 4),
+                "payment_delta": round((intel.collection_score or 0.0) - (intel.collection_previous or 0.0), 4),
+                
+                # Risk score and safety score (P1)
+                "risk_score": round(intel.risk_score or 0.0, 4),
+                "safety_score": round(1.0 - (intel.risk_score or 0.0), 4),
+                
+                # Expose delay metrics (P0 / Capability 04)
+                "average_payment_delay_days": delay_avg,
+                "payment_delay": delay_avg,
+                "days_past_due": max(0, int(delay_avg)),
+                "dso": round(dso, 2),
+                
+                "repayment_health_delta": round((intel.collection_score or 0.0) - (intel.collection_previous or 0.0), 4),
+                "outstanding_delta": round((intel.outstanding_current or 0.0) - (intel.outstanding_previous or 0.0), 2),
+                "state": intel.state or "UNKNOWN",
+                "grade": "A" if (intel.trust_score or 0.0) >= 0.70 else "B" if (intel.trust_score or 0.0) >= 0.55 else "C" if (intel.trust_score or 0.0) >= 0.40 else "D",
+                "last_purchased_at": intel.last_purchase_date.isoformat() if intel.last_purchase_date else None,
+            })
+        return results
 
     async def get_high_risk_customers(self, reference_date: date, limit: int = 20) -> list[dict[str, Any]]:
         """
         Fetches top high credit-risk customers sorted by risk severity.
-        Queries ONLY customer_intelligence serving layer.
+        Calculates actual overdue amount dynamically and fetches actual credit_limit.
         """
         # SQL-side Risk Severity Score (1 - trust_score)
         risk_severity = (1.0 - func.coalesce(CustomerIntelligence.trust_score, 0.0)).label("risk_severity")
 
-        query = select(
-            CustomerIntelligence,
-            risk_severity
-        ).order_by(desc("risk_severity")).limit(limit)
+        subq = (
+            select(
+                FeatureSnapshot.customer_id,
+                func.max(FeatureSnapshot.snapshot_date).label("max_date")
+            )
+            .group_by(FeatureSnapshot.customer_id)
+            .subquery()
+        )
+
+        query = (
+            select(
+                CustomerIntelligence,
+                FeatureSnapshot,
+                risk_severity
+            )
+            .outerjoin(subq, CustomerIntelligence.customer_id == subq.c.customer_id)
+            .outerjoin(
+                FeatureSnapshot,
+                (FeatureSnapshot.customer_id == subq.c.customer_id) &
+                (FeatureSnapshot.snapshot_date == subq.c.max_date)
+            )
+            .order_by(desc("risk_severity"))
+            .limit(limit)
+        )
         
         res = await self.db.execute(query)
+        res_all = res.all()
 
-        return [
-            {
-                "customer_id": r[0].customer_id,
-                "customer_name": r[0].customer_name or r[0].customer_id,
-                "state": r[0].state or "UNKNOWN",
-                "grade": "A" if (r[0].trust_score or 0.0) >= 0.70 else "B" if (r[0].trust_score or 0.0) >= 0.55 else "C" if (r[0].trust_score or 0.0) >= 0.40 else "D",
-                "trust_score": round(r[0].trust_score or 0.0, 4),
-                "outstanding_current": round(r[0].outstanding_current or 0.0, 2),
-                "overdue_amount": 0.0,
-                "credit_limit": 0.0,
-                "credit_utilization": 0.0,
-                "repayment_health_score": 0.0,
-                "last_purchased_at": r[0].last_purchase_date.isoformat() if r[0].last_purchase_date else None,
-            } for r in res.all()
-        ]
+        # Compute dynamic outstanding and overdue from EventLedger via precise FIFO mapping
+        overdue_map = await self.get_outstanding_and_overdue_amounts(reference_date)
+
+        credit_limits = {}
+        try:
+            import uuid
+            from core.storage.postgres import get_reflected_table
+            customers_tbl = await get_reflected_table("customers", self.db)
+            if customers_tbl is not None:
+                cust_ids_uuid = [uuid.UUID(r[0].customer_id) for r in res_all]
+                limit_stmt = select(customers_tbl.c.id, customers_tbl.c.credit_limit).where(customers_tbl.c.id.in_(cust_ids_uuid))
+                limit_res = await self.db.execute(limit_stmt)
+                credit_limits = {str(row.id): float(row.credit_limit or 0.0) for row in limit_res.fetchall()}
+        except Exception:
+            pass
+
+        results = []
+        for r in res_all:
+            intel = r[0]
+            snap = r[1]
+            delay_avg = snap.payment_delay_avg if (snap and snap.payment_delay_avg is not None) else 0.0
+            
+            outstanding_val = overdue_map.get(intel.customer_id, {}).get("outstanding", round(intel.outstanding_current or 0.0, 2))
+            overdue_val = overdue_map.get(intel.customer_id, {}).get("overdue", 0.0)
+            
+            credit_lim = credit_limits.get(intel.customer_id, 1000000.0)
+            credit_util = (outstanding_val / credit_lim) if credit_lim > 0.0 else 0.0
+
+            results.append({
+                "customer_id": intel.customer_id,
+                "customer_name": intel.customer_name or intel.customer_id,
+                "state": intel.state or "UNKNOWN",
+                "grade": "A" if (intel.trust_score or 0.0) >= 0.70 else "B" if (intel.trust_score or 0.0) >= 0.55 else "C" if (intel.trust_score or 0.0) >= 0.40 else "D",
+                "trust_score": round(intel.trust_score or 0.0, 4),
+                
+                # Expose risk_score and safety_score (P1)
+                "risk_score": round(intel.risk_score or 0.0, 4),
+                "safety_score": round(1.0 - (intel.risk_score or 0.0), 4),
+                
+                # Expose delay metrics (P0 / Capability 04)
+                "average_payment_delay_days": delay_avg,
+                "payment_delay": delay_avg,
+                "days_past_due": max(0, int(delay_avg)),
+                "dso": round(30.0 + delay_avg, 2),
+                
+                "outstanding_current": outstanding_val,
+                "overdue_amount": overdue_val,
+                "credit_limit": credit_lim,
+                "credit_utilization": round(credit_util, 4),
+                "repayment_health_score": round(intel.collection_score or 0.0, 4),
+                "last_purchased_at": intel.last_purchase_date.isoformat() if intel.last_purchase_date else None,
+            })
+        return results
 
     async def get_top_contributors(self, s_date: date, e_date: date, limit: int = 10) -> list[dict[str, Any]]:
         """

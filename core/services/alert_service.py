@@ -45,7 +45,10 @@ class AlertService:
         customer_id: str | None,
         limit: int,
         offset: int,
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        sort_by: str | None = "created_at",
+        sort_order: str | None = "desc",
+        search: str | None = None
     ) -> list[Alert]:
         """
         Queries and filters active warning alerts.
@@ -56,7 +59,29 @@ class AlertService:
             severity=severity,
             customer_id=customer_id,
             limit=limit,
-            offset=offset
+            offset=offset,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            search=search
+        )
+
+    async def get_alerts_count_filtered(
+        self,
+        status: str | None,
+        severity: str | None,
+        customer_id: str | None,
+        search: str | None,
+        db_session: AsyncSession
+    ) -> int:
+        """
+        Retrieves total count of alerts matching filters.
+        """
+        repo = AlertRepository(db_session)
+        return await repo.get_alerts_count_filtered(
+            status=status,
+            severity=severity,
+            customer_id=customer_id,
+            search=search
         )
 
     async def get_alerts_count(self, db_session: AsyncSession) -> dict:

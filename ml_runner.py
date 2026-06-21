@@ -7,6 +7,11 @@ from core.ml.prediction_service import MLPredictionService
 
 
 async def main():
+    from core.storage.postgres import wait_for_db_tables
+    if not await wait_for_db_tables(timeout=30):
+        logger.error("ML | Database schema is not ready. Exiting.")
+        sys.exit(1)
+
     # If no customer ID is passed, run a demo with a query
     if len(sys.argv) < 2:
         # Fetch a customer ID from the database for demo

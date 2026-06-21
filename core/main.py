@@ -16,7 +16,7 @@ from core.auth.users import router as users_router
 from core.config.settings import settings
 from core.core.exceptions import custom_http_exception_handler, global_exception_handler, validation_exception_handler
 from core.core.responses import success_response
-from core.customers.routes import customer_detail_router
+from core.customers.routes import customer_detail_router, intelligence_router
 from core.customers.routes import router as customers_listing_router
 from core.dashboard.routes import router as dashboard_router
 from core.ingestion.sync_pipeline import SyncPipeline
@@ -174,12 +174,17 @@ api_v1_router.include_router(users_router)
 api_v1_router.include_router(api_keys_router)
 api_v1_router.include_router(customers_listing_router)
 api_v1_router.include_router(customer_detail_router)
+api_v1_router.include_router(intelligence_router)
 api_v1_router.include_router(dashboard_router)
 api_v1_router.include_router(operations_router)
 api_v1_router.include_router(explainability_router)
 api_v1_router.include_router(simulator_router)
 api_v1_router.include_router(advisor_router)
 api_v1_router.include_router(ml_router)
+
+from core.analytics.routes import router as analytics_router
+api_v1_router.include_router(analytics_router)
+
 
 
 

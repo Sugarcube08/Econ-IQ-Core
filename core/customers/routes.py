@@ -1,5 +1,6 @@
 import time
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import polars as pl
 from fastapi import APIRouter, Depends, Query, Request
@@ -40,6 +41,130 @@ from core.storage.postgres import get_db
 from core.utils.temporal import normalize_temporal_to_date, normalize_temporal_to_str
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
+
+intelligence_router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+
+def map_behavioral_state(s: str | None) -> str:
+    if not s:
+        return "HEALTHY"
+    s_lower = s.lower()
+    if s_lower in ("declining", "stressed", "distressed", "liquidity_stress"):
+        return "LIQUIDITY_STRESS"
+    if s_lower in ("inactive", "contract", "dormant"):
+        return "CONTRACT"
+    if s_lower in ("irregular", "monitor", "overleveraged"):
+        return "MONITOR"
+    return "HEALTHY"
+
+@intelligence_router.get(
+    "/risk-signals",
+    response_model=StandardResponse[Any]
+)
+async def get_risk_signals_endpoint(
+    request: Request,
+    page: int | None = Query(None, ge=1, description="Page number"),
+    limit: int = Query(25, ge=1, le=100, description="Records per page"),
+    sort_by: str = Query("risk_score", description="Field to sort by"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order"),
+    search: str | None = Query(None, description="Fuzzy search by customer ID or name"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Retrieve list of customer risk signals, including trust deltas and safety scores.
+    """
+    # Construct base query
+    from core.models.state_models import FeatureSnapshot
+    subq = select(
+        FeatureSnapshot.customer_id,
+        func.max(FeatureSnapshot.snapshot_date).label("max_date")
+    ).group_by(FeatureSnapshot.customer_id).subquery()
+
+    stmt = select(
+        CustomerIntelligence,
+        FeatureSnapshot.payment_delay_avg
+    ).outerjoin(
+        subq, CustomerIntelligence.customer_id == subq.c.customer_id
+    ).outerjoin(
+        FeatureSnapshot,
+        (FeatureSnapshot.customer_id == subq.c.customer_id) &
+        (FeatureSnapshot.snapshot_date == subq.c.max_date)
+    )
+    
+    # Filter search
+    if search:
+        search_filter = (
+            (CustomerIntelligence.customer_name.ilike(f"%{search}%")) |
+            (CustomerIntelligence.customer_id.ilike(f"%{search}%"))
+        )
+        stmt = stmt.where(search_filter)
+        
+    # Sort mapping
+    sort_mapping = {
+        "risk_score": CustomerIntelligence.risk_score,
+        "customer_name": CustomerIntelligence.customer_name,
+        "outstanding_current": CustomerIntelligence.outstanding_current,
+        "state": CustomerIntelligence.state,
+    }
+    sort_col = sort_mapping.get(sort_by, CustomerIntelligence.risk_score)
+    if sort_order == "desc":
+        stmt = stmt.order_by(desc(sort_col))
+    else:
+        stmt = stmt.order_by(asc(sort_col))
+        
+    # Get total count
+    count_stmt = select(func.count(CustomerIntelligence.customer_id))
+    if search:
+        search_filter = (
+            (CustomerIntelligence.customer_name.ilike(f"%{search}%")) |
+            (CustomerIntelligence.customer_id.ilike(f"%{search}%"))
+        )
+        count_stmt = count_stmt.where(search_filter)
+    total_res = await db.execute(count_stmt)
+    total = total_res.scalar() or 0
+    
+    # Pagination
+    is_paginated = (page is not None)
+    calc_offset = 0
+    if is_paginated:
+        calc_offset = (page - 1) * limit
+        stmt = stmt.limit(limit).offset(calc_offset)
+        
+    res = await db.execute(stmt)
+    rows = res.all()
+    
+    items = []
+    for r, delay_avg in rows:
+        r_score = r.risk_score or 0.0
+        t_score = r.trust_score or 0.0
+        t_prev = r.trust_previous or 0.0
+        trust_delta = round(t_score - t_prev, 4) if (r.trust_score is not None and r.trust_previous is not None) else 0.0
+        
+        items.append({
+            "customer_id": r.customer_id,
+            "customer_name": r.customer_name or "Unknown",
+            "risk_score": r_score,
+            "safety_score": round(1.0 - r_score, 4),
+            "trust_delta": trust_delta,
+            "outstanding_current": r.outstanding_current or 0.0,
+            "state": map_behavioral_state(r.state),
+            "payment_delay": float(delay_avg or 0.0)
+        })
+        
+    if is_paginated:
+        total_pages = (total + limit - 1) // limit if limit > 0 else 0
+        data = {
+            "items": items,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages
+        }
+    else:
+        data = items
+        
+    return success_response("Risk signals retrieved successfully", data=data, request=request)
+
 
 # Global metadata to cache reflected tables
 _metadata = MetaData()
@@ -366,6 +491,7 @@ async def list_customers_datatable(
             # 8 Canonical Scores
             health_score=h_score,
             risk_score=risk_score,
+            safety_score=round(1.0 - risk_score, 4),
             growth_score=g_score,
             trust_score=t_score,
             opportunity_score=opp_score,
@@ -643,6 +769,7 @@ async def get_customer_profile(
                 scores=CustomerScoreSchema(
                     health_score=h_score,
                     risk_score=risk_score,
+                    safety_score=round(1.0 - risk_score, 4),
                     growth_score=g_score,
                     trust_score=t_score,
                     opportunity_score=opp_score,
@@ -727,6 +854,7 @@ async def get_customer_profile(
         scores_dict = {
             "health_score": curr_row.get("health_score") or 0.0,
             "risk_score": curr_row.get("risk_score") or 0.0,
+            "safety_score": round(1.0 - (curr_row.get("risk_score") or 0.0), 4),
             "growth_score": curr_row.get("growth_score") or 0.0,
             "trust_score": curr_row.get("trust_score") or 0.0,
             "opportunity_score": curr_row.get("opportunity_score") or 0.0,
@@ -1455,4 +1583,137 @@ async def get_customer_graphs_timeline(
         data={"timeline": timeline},
         request=request
     )
+
+
+@customer_detail_router.get(
+    "/{id}/timeline",
+    response_model=StandardResponse[dict],
+)
+async def get_customer_timeline_endpoint(
+    id: str,
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(50, ge=1, le=100, description="Records per page"),
+    event_types: str | None = Query(None, description="Comma-separated event type filters"),
+    db: AsyncSession = Depends(get_db),
+    identity: User | APIKey = Depends(require_permissions([Permission.INTEL_READ])),
+):
+    """
+    Unified Activity Timeline Engine Endpoint.
+    Aggregates events from multiple domains and returns them chronologically.
+    """
+    customer_id = id.strip()
+    from datetime import datetime, UTC
+    from core.models.state_models import EventLedger, Alert, CollectionActivity, PaymentCommitment, DecisionAudit
+    
+    events = []
+    
+    # 1. Ledger Transactions
+    ledger_stmt = select(EventLedger).where(
+        EventLedger.customer_id == customer_id,
+        not_(EventLedger.is_voided)
+    )
+    ledger_res = await db.execute(ledger_stmt)
+    for r in ledger_res.scalars().all():
+        dt = datetime.combine(r.event_date, datetime.min.time(), tzinfo=UTC)
+        etype = "INVOICE" if r.event_type == "SALE" else r.event_type
+        title = "Invoice Issued" if etype == "INVOICE" else "Payment Received" if etype == "PAYMENT" else "Return Processed"
+        events.append({
+            "id": r.event_id,
+            "timestamp": dt.isoformat(),
+            "event_type": etype,
+            "title": title,
+            "description": f"{title} of {r.amount:.2f}",
+            "metadata": r.metadata_ or {}
+        })
+
+    # 2. System Alerts
+    alerts_stmt = select(Alert).where(Alert.customer_id == customer_id)
+    alerts_res = await db.execute(alerts_stmt)
+    for r in alerts_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "ALERT",
+            "title": r.title,
+            "description": r.description,
+            "metadata": {
+                "alert_id": r.id,
+                "severity": r.alert_severity,
+                "status": r.status
+            }
+        })
+
+    # 3. Collections Activity
+    coll_stmt = select(CollectionActivity).where(CollectionActivity.customer_id == customer_id)
+    coll_res = await db.execute(coll_stmt)
+    for r in coll_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "COLLECTION",
+            "title": f"Collection Activity: {r.activity_type}",
+            "description": r.notes,
+            "metadata": {
+                "user_id": r.user_id,
+                "outcome": r.outcome
+            }
+        })
+
+    # 4. Payment Commitments
+    comm_stmt = select(PaymentCommitment).where(PaymentCommitment.customer_id == customer_id)
+    comm_res = await db.execute(comm_stmt)
+    for r in comm_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.created_at.isoformat() if r.created_at else None,
+            "event_type": "COMMITMENT",
+            "title": "Payment Commitment promised",
+            "description": f"Promised to pay {r.amount:.2f} on {r.promised_date.isoformat() if r.promised_date else 'Unknown'}",
+            "metadata": {
+                "status": r.status,
+                "promised_date": r.promised_date.isoformat() if r.promised_date else None
+            }
+        })
+
+    # 5. Decisions
+    dec_stmt = select(DecisionAudit).where(DecisionAudit.customer_id == customer_id)
+    dec_res = await db.execute(dec_stmt)
+    for r in dec_res.scalars().all():
+        events.append({
+            "id": r.id,
+            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            "event_type": "DECISION",
+            "title": f"Decision: {r.action_taken}",
+            "description": r.reason,
+            "metadata": {
+                "performed_by": r.performed_by,
+                "recommendation_id": r.recommendation_id
+            }
+        })
+
+    # Filter event types if specified
+    if event_types:
+        allowed = [t.strip().upper() for t in event_types.split(",")]
+        events = [e for e in events if e["event_type"] in allowed]
+
+    # Sort chronological only (newest first)
+    events.sort(key=lambda e: e["timestamp"] or "", reverse=True)
+
+    # Paginate
+    total = len(events)
+    offset = (page - 1) * limit
+    paginated_items = events[offset : offset + limit]
+    total_pages = (total + limit - 1) // limit if limit > 0 else 0
+
+    response_data = {
+        "items": paginated_items,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": total_pages
+    }
+
+    return success_response("Timeline retrieved successfully", data=response_data, request=request)
+
 

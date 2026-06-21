@@ -2,10 +2,10 @@ import uuid
 from datetime import UTC, datetime
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models.state_models import Alert
+from core.models.state_models import Alert, CustomerIntelligence
 
 
 class AlertRepository:
@@ -54,18 +54,75 @@ class AlertRepository:
         severity: str | None,
         customer_id: str | None,
         limit: int,
-        offset: int
+        offset: int,
+        sort_by: str | None = "created_at",
+        sort_order: str | None = "desc",
+        search: str | None = None
     ) -> list[Alert]:
-        stmt = select(Alert)
+        stmt = select(Alert, CustomerIntelligence.customer_name).outerjoin(
+            CustomerIntelligence, Alert.customer_id == CustomerIntelligence.customer_id
+        )
         if status:
             stmt = stmt.where(Alert.status == status)
         if severity:
             stmt = stmt.where(Alert.alert_severity == severity)
         if customer_id:
             stmt = stmt.where(Alert.customer_id == customer_id)
-        stmt = stmt.order_by(Alert.created_at.desc()).limit(limit).offset(offset)
+        if search:
+            stmt = stmt.where(
+                (Alert.title.ilike(f"%{search}%")) |
+                (Alert.description.ilike(f"%{search}%")) |
+                (CustomerIntelligence.customer_name.ilike(f"%{search}%"))
+            )
+            
+        sort_mapping = {
+            "created_at": Alert.created_at,
+            "alert_severity": Alert.alert_severity,
+            "alert_type": Alert.alert_type,
+            "title": Alert.title,
+            "status": Alert.status,
+            "customer_name": CustomerIntelligence.customer_name,
+            "customer_id": Alert.customer_id,
+        }
+        sort_col = sort_mapping.get(sort_by, Alert.created_at)
+        if sort_order == "desc":
+            stmt = stmt.order_by(desc(sort_col))
+        else:
+            stmt = stmt.order_by(asc(sort_col))
+            
+        stmt = stmt.limit(limit).offset(offset)
         res = await self.db.execute(stmt)
-        return list(res.scalars().all())
+        
+        alerts = []
+        for alert_obj, name in res.all():
+            alert_obj.customer_name = name or "Unknown"
+            alerts.append(alert_obj)
+        return alerts
+
+    async def get_alerts_count_filtered(
+        self,
+        status: str | None,
+        severity: str | None,
+        customer_id: str | None,
+        search: str | None
+    ) -> int:
+        stmt = select(func.count(Alert.id)).outerjoin(
+            CustomerIntelligence, Alert.customer_id == CustomerIntelligence.customer_id
+        )
+        if status:
+            stmt = stmt.where(Alert.status == status)
+        if severity:
+            stmt = stmt.where(Alert.alert_severity == severity)
+        if customer_id:
+            stmt = stmt.where(Alert.customer_id == customer_id)
+        if search:
+            stmt = stmt.where(
+                (Alert.title.ilike(f"%{search}%")) |
+                (Alert.description.ilike(f"%{search}%")) |
+                (CustomerIntelligence.customer_name.ilike(f"%{search}%"))
+            )
+        res = await self.db.execute(stmt)
+        return res.scalar() or 0
 
     async def get_alerts_count(self) -> dict:
         active_stmt = select(func.count(Alert.id)).where(Alert.status == "ACTIVE")

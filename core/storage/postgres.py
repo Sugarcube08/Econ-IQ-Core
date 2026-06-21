@@ -86,3 +86,29 @@ async def get_reflected_table(table_name: str, session: AsyncSession) -> Table |
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+
+async def wait_for_db_tables(timeout: int = 30, interval: float = 1.0) -> bool:
+    """
+    Waits for the database tables to be created (e.g. by the API lifespan startup).
+    Returns True if the schema is ready, False if the timeout was reached.
+    """
+    import asyncio
+    from loguru import logger
+    from sqlalchemy import text
+
+    logger.info("DB | Waiting for database schema to be ready...")
+    elapsed = 0.0
+    while elapsed < timeout:
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1 FROM customer_intelligence LIMIT 1"))
+                logger.info("DB | Database schema is ready.")
+                return True
+        except Exception as e:
+            logger.debug(f"DB | Database schema not ready yet (will retry): {e}")
+            await asyncio.sleep(interval)
+            elapsed += interval
+    logger.error("DB | Timeout waiting for database schema to be ready.")
+    return False
+
