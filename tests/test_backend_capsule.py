@@ -78,3 +78,47 @@ async def test_portfolio_overview_growth_and_adherence():
     assert "top_account_share" in res_data
     assert "growth_trajectory" in res_data
     assert "opportunity_index" in res_data
+
+    # Verify refactored collections fields
+    assert "summary" in res_data
+    assert "total_outstanding" in res_data["summary"]
+    assert "total_recovered_30d" in res_data["summary"]
+    assert "recovery_rate_ytd" in res_data["summary"]
+    assert "active_commitments_count" in res_data["summary"]
+
+    assert "priority_distribution" in res_data
+    assert "critical_count" in res_data["priority_distribution"]
+    assert "high_count" in res_data["priority_distribution"]
+    assert "medium_count" in res_data["priority_distribution"]
+    assert "low_count" in res_data["priority_distribution"]
+
+
+@pytest.mark.asyncio
+async def test_collection_queue_endpoint():
+    """Verify GET /api/v1/analytics/collection-queue returns paginated list of prioritized accounts."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.get("/api/v1/analytics/collection-queue?page=1&limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    res_data = data["data"]
+    assert "items" in res_data
+    assert "pagination" in res_data
+    pagination = res_data["pagination"]
+    assert "page" in pagination
+    assert "limit" in pagination
+    assert "total" in pagination
+    assert "total_pages" in pagination
+    
+    if len(res_data["items"]) > 0:
+        item = res_data["items"][0]
+        assert "customer_id" in item
+        assert "customer_name" in item
+        assert "outstanding" in item
+        assert "recovered_ytd" in item
+        assert "priority_score" in item
+        assert "priority_level" in item
+        assert "primary_dunning_reason" in item
+        assert "last_outreach_date" in item
+

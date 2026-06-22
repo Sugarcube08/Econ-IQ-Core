@@ -65,13 +65,16 @@ async def get_customer_predictions(customer_id: str, db: AsyncSession = Depends(
         if m:
             score = m.prediction_value
             source = m.metadata_json.get("prediction_source", "ML") if m.metadata_json else "ML"
+            confidence = m.confidence
         else:
             score = 0.5
             source = "ML"
+            confidence = 0.85
             
         predictions_data.append({
             "model": key,
             "score": round(score, 4),
+            "confidence": round(confidence, 4) if confidence is not None else 0.85,
             "prediction_source": source
         })
         

@@ -437,6 +437,11 @@ class IntelligenceOrchestrator:
                                 "contribution_previous": 0.0,
                                 "outstanding_previous": 0.0,
                                 "last_purchase_date": None,
+                                "recovered_current_30d": 0.0,
+                                "recovered_total_ytd": 0.0,
+                                "collection_priority_score": 0.0,
+                                "priority_level": "LOW",
+                                "primary_dunning_reason": None,
                                 "v2_scores": {
                                     "growth_score": 0.0,
                                     "risk_score": 0.0,
@@ -616,6 +621,143 @@ class IntelligenceOrchestrator:
                         for evt in events_to_add:
                             session.add(evt)
 
+                        # 4.5 Calculate Collections Metrics & CPI Priority Scoring
+                        import math
+                        from datetime import date
+
+                        from sqlalchemy import func, not_
+
+                        from core.models.state_models import CustomerIntelligence, EventLedger, PaymentCommitment
+
+                        # Determine DPD (Days Past Due) from FIFO billing
+                        cust_events = []
+                        if not cust_df.is_empty():
+                            for row in cust_df.sort(["event_date", "event_id"]).to_dicts():
+                                cust_events.append((row["event_date"], row["amount"], row["event_type"]))
+                        
+                        bills = []
+                        for edate, amt, etype in cust_events:
+                            if isinstance(edate, datetime):
+                                edate = edate.date()
+                            if etype in ("SALE", "OPENING_BALANCE"):
+                                bills.append([edate, amt])
+                            elif etype in ("PAYMENT", "RETURN", "DISCOUNT"):
+                                credit = amt
+                                while credit > 0 and bills:
+                                    if credit >= bills[0][1]:
+                                        credit -= bills[0][1]
+                                        bills.pop(0)
+                                    else:
+                                        bills[0][1] -= credit
+                                        credit = 0
+
+                        dpd = 0
+                        ref_date = current_end.date()
+                        for b_date, b_rem in bills:
+                            if b_rem > 0:
+                                dpd = max(dpd, (ref_date - b_date).days)
+
+                        # Determine if customer had a broken payment promise in the last 30 days
+                        broken_stmt = select(func.count(PaymentCommitment.id)).where(
+                            PaymentCommitment.customer_id == cid,
+                            PaymentCommitment.status == "BROKEN",
+                            PaymentCommitment.promised_date >= current_end.date() - timedelta(days=30)
+                        )
+                        broken_res = await session.execute(broken_stmt)
+                        has_broken = (broken_res.scalar() or 0) > 0
+
+                        # S_balance: log of outstanding_current normalized from 0 to 10
+                        # Using dynamic max_outstanding from database with fallback to 1,000,000
+                        max_outstanding = 1000000.0
+                        try:
+                            max_outstanding_stmt = select(func.max(CustomerIntelligence.outstanding_current))
+                            max_res = await session.execute(max_outstanding_stmt)
+                            db_max = max_res.scalar()
+                            if db_max and db_max > max_outstanding:
+                                max_outstanding = float(db_max)
+                        except Exception:
+                            pass
+                        
+                        if curr_outstanding <= 0.0:
+                            s_balance = 0.0
+                        else:
+                            ln_val = math.log(max(1.0, curr_outstanding))
+                            max_ln = math.log(max_outstanding)
+                            s_balance = (ln_val / max_ln * 10.0) if max_ln > 0 else 0.0
+                            s_balance = min(10.0, max(0.0, s_balance))
+
+                        # S_aging DPD score
+                        if dpd >= 90:
+                            s_aging = 10.0
+                        elif dpd >= 61:
+                            s_aging = 7.5
+                        elif dpd >= 31:
+                            s_aging = 5.0
+                        elif dpd >= 1:
+                            s_aging = 2.5
+                        else:
+                            s_aging = 0.0
+
+                        s_risk = curr_risk * 10.0
+                        s_trust = trust_score * 10.0
+                        p_broken = 15.0 if has_broken else 0.0
+
+                        # CPI Score calculation
+                        cpi_score = 3.0 * s_balance + 4.0 * s_aging + 2.0 * s_risk - 1.0 * s_trust + p_broken
+                        cpi_score = min(100.0, max(0.0, cpi_score))
+
+                        # Priority level assignment
+                        if cpi_score >= 80.0:
+                            priority_level = "CRITICAL"
+                        elif cpi_score >= 50.0:
+                            priority_level = "HIGH"
+                        elif cpi_score >= 20.0:
+                            priority_level = "MEDIUM"
+                        else:
+                            priority_level = "LOW"
+
+                        # Dunning reason
+                        reasons = []
+                        if has_broken:
+                            reasons.append("Broken Promise")
+                        if dpd >= 90:
+                            reasons.append("90+ DPD")
+                        elif dpd >= 60:
+                            reasons.append("60+ DPD")
+                        elif dpd >= 30:
+                            reasons.append("30+ DPD")
+                        
+                        if not reasons:
+                            if curr_risk >= 0.7:
+                                reasons.append("High Risk Score")
+                            elif curr_outstanding > 0:
+                                reasons.append("Outstanding Balance")
+                            else:
+                                reasons.append("Review Required")
+                                
+                        primary_dunning_reason = " + ".join(reasons)
+
+                        # Recovery metrics: payments cleared in last 30d
+                        recovered_30d_stmt = select(func.sum(EventLedger.amount)).where(
+                            EventLedger.customer_id == cid,
+                            EventLedger.event_type == "PAYMENT",
+                            EventLedger.event_date >= current_end.date() - timedelta(days=30),
+                            not_(EventLedger.is_voided)
+                        )
+                        recovered_30d_res = await session.execute(recovered_30d_stmt)
+                        recovered_current_30d = float(recovered_30d_res.scalar() or 0.0)
+
+                        # Recovery metrics: YTD payments
+                        jan_1st = date(current_end.year, 1, 1)
+                        recovered_ytd_stmt = select(func.sum(EventLedger.amount)).where(
+                            EventLedger.customer_id == cid,
+                            EventLedger.event_type == "PAYMENT",
+                            EventLedger.event_date >= jan_1st,
+                            not_(EventLedger.is_voided)
+                        )
+                        recovered_ytd_res = await session.execute(recovered_ytd_stmt)
+                        recovered_total_ytd = float(recovered_ytd_res.scalar() or 0.0)
+
                         # 5. Populate Consolidated Intelligence Data (Cache)
                         intel_data = {
                             "customer_id": cid,
@@ -631,6 +773,11 @@ class IntelligenceOrchestrator:
                             "relationship_score": curr_row.get("relationship_score"),
                             "contribution_current": curr_contrib,
                             "outstanding_current": curr_outstanding,
+                            "recovered_current_30d": recovered_current_30d,
+                            "recovered_total_ytd": recovered_total_ytd,
+                            "collection_priority_score": cpi_score,
+                            "priority_level": priority_level,
+                            "primary_dunning_reason": primary_dunning_reason,
                             "state": state_val,
                             "current_state": state_val,
                             "customer_archetype": archetype_val,

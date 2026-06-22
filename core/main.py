@@ -82,6 +82,30 @@ async def lifespan(app: FastAPI):
                         FailureRegistry.record("DB_SCHEMA_VERIFY_RACE", f"Database schema verification race condition handled: {e}", "WARNING", extra={"error": str(e)})
                     else:
                         raise
+            
+            # Dynamically add the new columns if they are missing (Migration)
+            async with engine.begin() as conn:
+                def add_missing_columns(sync_conn):
+                    from sqlalchemy import inspect, text
+                    inspector = inspect(sync_conn)
+                    cols = [c["name"] for c in inspector.get_columns("customer_intelligence")]
+                    
+                    new_cols = {
+                        "recovered_current_30d": "ALTER TABLE customer_intelligence ADD COLUMN recovered_current_30d FLOAT DEFAULT 0.0",
+                        "recovered_total_ytd": "ALTER TABLE customer_intelligence ADD COLUMN recovered_total_ytd FLOAT DEFAULT 0.0",
+                        "collection_priority_score": "ALTER TABLE customer_intelligence ADD COLUMN collection_priority_score FLOAT DEFAULT 0.0",
+                        "priority_level": "ALTER TABLE customer_intelligence ADD COLUMN priority_level VARCHAR DEFAULT 'LOW'",
+                        "primary_dunning_reason": "ALTER TABLE customer_intelligence ADD COLUMN primary_dunning_reason VARCHAR",
+                    }
+                    
+                    for col, sql in new_cols.items():
+                        if col not in cols:
+                            try:
+                                sync_conn.execute(text(sql))
+                                logger.info(f"DB | Successfully added column '{col}' to 'customer_intelligence'")
+                            except Exception as e:
+                                logger.error(f"DB | Failed to add column '{col}': {e}")
+                await conn.run_sync(add_missing_columns)
 
         # Run strict schema validation (Zero mutations, verification only)
         async with engine.connect() as conn:
