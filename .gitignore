@@ -41,7 +41,7 @@ artifacts/
 # ML/DL checkpoints and runs
 mlruns/
 checkpoints/
-models/
+/models/
 .onnx
 
 # Testing & coverage
