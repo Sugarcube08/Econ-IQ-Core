@@ -91,8 +91,12 @@ async def init():
 asyncio.run(init())
 '
 
-echo "=== Seeding Demo Customers ==="
-python seed_demo_customers.py || echo "Warning: Demo customer seeding failed or already exists"
+if [ "$APP_ENV" != "production" ] && [ "$APP_ENV" != "Production" ]; then
+  echo "=== Seeding Demo Customers ==="
+  python seed_demo_customers.py || echo "Warning: Demo customer seeding failed or already exists"
+else
+  echo "=== Production Mode Detected: Skipping Demo Seeding ==="
+fi
 
 echo "=== Starting Services via Supervisor ==="
 exec supervisord -c /etc/supervisor/conf.d/econiq.conf

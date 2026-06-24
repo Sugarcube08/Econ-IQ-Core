@@ -136,35 +136,40 @@ async def seed():
                 "id": WHALE_ID, "name": "Titan B2B Industries", "city": "Mumbai",
                 "health": 0.92, "risk": 0.08, "growth": 0.85, "trust": 0.94,
                 "opp": 0.35, "credit": 0.95, "coll": 0.02, "rel": 0.93,
-                "outstanding": 1250000.0, "contrib": 0.142, "state": "elite"
+                "outstanding": 1250000.0, "contrib": 0.142, "state": "elite",
+                "curr_state": "healthy", "archetype": "whale", "risk_dir": "stable", "trust_dir": "stable"
             },
             # 2. Distressed
             {
                 "id": DISTRESSED_ID, "name": "Deccan Logistics Ltd", "city": "Hyderabad",
                 "health": 0.31, "risk": 0.89, "growth": 0.15, "trust": 0.25,
                 "opp": 0.65, "credit": 0.20, "coll": 0.88, "rel": 0.40,
-                "outstanding": 840000.0, "contrib": 0.021, "state": "declining"
+                "outstanding": 840000.0, "contrib": 0.021, "state": "declining",
+                "curr_state": "declining", "archetype": "declining_retailer", "risk_dir": "increasing", "trust_dir": "decreasing"
             },
             # 3. Recovering
             {
                 "id": RECOVERING_ID, "name": "Himalayan Forge Corp", "city": "Shimla",
                 "health": 0.61, "risk": 0.38, "growth": 0.45, "trust": 0.82,
                 "opp": 0.50, "credit": 0.58, "coll": 0.32, "rel": 0.65,
-                "outstanding": 320000.0, "contrib": 0.054, "state": "irregular"
+                "outstanding": 320000.0, "contrib": 0.054, "state": "irregular",
+                "curr_state": "recovering", "archetype": "liquidity_stressed", "risk_dir": "decreasing", "trust_dir": "increasing"
             },
             # 4. Dormant
             {
                 "id": DORMANT_ID, "name": "Coromandel Retailers", "city": "Chennai",
                 "health": 0.27, "risk": 0.45, "growth": 0.10, "trust": 0.91,
                 "opp": 0.82, "credit": 0.65, "coll": 0.15, "rel": 0.30,
-                "outstanding": 0.0, "contrib": 0.0, "state": "inactive"
+                "outstanding": 0.0, "contrib": 0.0, "state": "inactive",
+                "curr_state": "dormant", "archetype": "stable_retailer", "risk_dir": "stable", "trust_dir": "stable"
             },
             # 5. Expansion
             {
                 "id": EXPANSION_ID, "name": "Narmada Agri Solutions", "city": "Bhopal",
                 "health": 0.83, "risk": 0.12, "growth": 0.88, "trust": 0.85,
                 "opp": 0.88, "credit": 0.80, "coll": 0.08, "rel": 0.85,
-                "outstanding": 150000.0, "contrib": 0.083, "state": "active"
+                "outstanding": 150000.0, "contrib": 0.083, "state": "active",
+                "curr_state": "growing", "archetype": "growing_retailer", "risk_dir": "stable", "trust_dir": "stable"
             }
         ]
 
@@ -182,7 +187,7 @@ async def seed():
                     :id, :name, :city, :health, :risk, :growth,
                     :trust, :opp, :credit, :coll, :rel,
                     :outstanding, :outstanding_prev, :contrib, :contrib_prev,
-                    :state, :state, :state, 'STABLE', 'STABLE',
+                    :state, :curr_state, :archetype, :risk_dir, :trust_dir,
                     :health_prev, :risk_prev, :growth, :trust, :opp,
                     :credit, :coll, :rel,
                     :last_purchase, NOW()
@@ -205,6 +210,10 @@ async def seed():
                 "contrib": i["contrib"] * 100.0,
                 "contrib_prev": max(0.0, i["contrib"] * 95.0),
                 "state": i["state"],
+                "curr_state": i["curr_state"],
+                "archetype": i["archetype"],
+                "risk_dir": i["risk_dir"],
+                "trust_dir": i["trust_dir"],
                 "health_prev": max(0.0, i["health"] - 0.02),
                 "risk_prev": max(0.0, i["risk"] + 0.01),
                 "last_purchase": date.today() - timedelta(days=5 if i["id"] != DORMANT_ID else 200)
@@ -337,6 +346,9 @@ async def seed():
         print("DEMO SEED | Seeding Feature snapshots for counterfactual simulation...")
         for cid in ids:
             snap_id = str(uuid.uuid4())
+            # Find the corresponding data from intelligence_data to keep it consistent
+            c_data = next(item for item in intelligence_data if item["id"] == cid)
+            
             stmt = text("""
                 INSERT INTO feature_snapshots (
                     snapshot_id, customer_id, snapshot_date, snapshot_source, snapshot_version, generator_version, feature_hash,
@@ -348,7 +360,7 @@ async def seed():
                 ) VALUES (
                     :snap_id, :cid, :snap_date, 'BATCH', '1.0.0', '1.0.0', :fhash,
                     :health, :risk, 0.8, 0.8, 0.1, 0.8, 0.8, 0.8,
-                    'active', 'elite', 'STABLE', 'STABLE',
+                    :curr_state, :archetype, :risk_dir, :trust_dir,
                     100000, 300000, 600000, 100000, 300000, 600000, 0, 0,
                     5, 2.5, 3.2, 0.0, 0.95,
                     200000, 0.1, 0.25, '{}', NOW()
@@ -358,7 +370,11 @@ async def seed():
                 "snap_id": snap_id, "cid": cid, "snap_date": date.today(),
                 "fhash": str(uuid.uuid4())[:8],
                 "health": 0.92 if cid == WHALE_ID else 0.31 if cid == DISTRESSED_ID else 0.61 if cid == RECOVERING_ID else 0.27 if cid == DORMANT_ID else 0.83,
-                "risk": 0.08 if cid == WHALE_ID else 0.89 if cid == DISTRESSED_ID else 0.38 if cid == RECOVERING_ID else 0.45 if cid == DORMANT_ID else 0.12
+                "risk": 0.08 if cid == WHALE_ID else 0.89 if cid == DISTRESSED_ID else 0.38 if cid == RECOVERING_ID else 0.45 if cid == DORMANT_ID else 0.12,
+                "curr_state": c_data["curr_state"],
+                "archetype": c_data["archetype"],
+                "risk_dir": c_data["risk_dir"],
+                "trust_dir": c_data["trust_dir"]
             })
 
         await s.commit()
