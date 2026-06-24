@@ -11,8 +11,15 @@ export PORT="${PORT:-8000}"
 export WORKERS="1"
 
 # Database Configuration (pointing to localhost since Postgres/Redis run inside this container)
-export POSTGRES_URL="${POSTGRES_URL:-postgresql+asyncpg://sugarcube:SugarCube#08@localhost:5432/ir_econiq}"
-export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
+if [ "$USE_INTERNAL_DB" = "true" ] || [ "$USE_INTERNAL_DB" = "True" ]; then
+  echo "=== Forcing use of container-internal PostgreSQL & Redis ==="
+  export POSTGRES_URL="postgresql+asyncpg://sugarcube:SugarCube#08@localhost:5432/ir_econiq"
+  export REDIS_URL="redis://localhost:6379/0"
+else
+  # Support standard DATABASE_URL fallback if POSTGRES_URL is not explicitly set
+  export POSTGRES_URL="${POSTGRES_URL:-${DATABASE_URL:-postgresql+asyncpg://sugarcube:SugarCube#08@localhost:5432/ir_econiq}}"
+  export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
+fi
 
 # JWT configuration with default working development keys
 export JWT_ALGORITHM="EdDSA"
