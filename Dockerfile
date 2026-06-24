@@ -10,8 +10,7 @@ ENV UV_HTTP_TIMEOUT=300
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies (without the project code itself) to leverage Docker cache
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 
 # Runtime stage: Install system services (Postgres, Redis, Supervisor) and copy virtual env
