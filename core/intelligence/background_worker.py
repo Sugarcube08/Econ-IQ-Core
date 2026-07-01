@@ -57,38 +57,33 @@ async def find_pending_customers(session) -> list[str]:
 
 async def start_background_worker():
     """
-    Main background loop that slowly and continuously recomputes customer intelligence.
+    Background worker that recomputes customer intelligence once.
     """
-    logger.info("SYSTEM | Starting background intelligence worker")
+    from core.config.settings import settings
+    logger.info(f"SYSTEM | Starting background intelligence worker (mode={settings.RUNTIME_MODE})")
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("SYSTEM | Background worker is disabled in SERVING mode.")
+        return
+
     orchestrator = IntelligenceOrchestrator()
     
-    # Simple delay to let the server start up and handle initial client requests first
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            # 1. Find a small set of pending customers
-            async with AsyncSessionLocal() as session:
-                customer_ids = await find_pending_customers(session)
+    try:
+        # Find a small set of pending customers
+        async with AsyncSessionLocal() as session:
+            customer_ids = await find_pending_customers(session)
+        
+        # Process
+        if customer_ids:
+            # Orchestrator handles loading context, compute, persist, commit, and session closure
+            await orchestrator.run(customer_ids)
+            global PROCESSED_CUSTOMERS_COUNT
+            PROCESSED_CUSTOMERS_COUNT += len(customer_ids)
+            FailureRegistry.recover("BACKGROUND_WORKER_QUERY_FAILED")
+            FailureRegistry.recover("BACKGROUND_WORKER_UNHANDLED")
             
-            # 2. Process
-            if customer_ids:
-                # Orchestrator handles loading context, compute, persist, commit, and session closure
-                await orchestrator.run(customer_ids)
-                global PROCESSED_CUSTOMERS_COUNT
-                PROCESSED_CUSTOMERS_COUNT += len(customer_ids)
-                FailureRegistry.recover("BACKGROUND_WORKER_QUERY_FAILED")
-                FailureRegistry.recover("BACKGROUND_WORKER_UNHANDLED")
-                
-        except asyncio.CancelledError:
-            logger.info("SYSTEM | Background worker task cancelled")
-            break
-        except Exception as e:
-            FailureRegistry.record("BACKGROUND_WORKER_UNHANDLED", f"Unhandled error in background worker loop: {e}", "ERROR", extra={"error": str(e)})
-            
-        finally:
-            # 5. Explicit cleanup of memory references
-            gc.collect()
-            
-        # 6. Sleep before next cycle
-        await asyncio.sleep(settings.WORKER_SLEEP_SECONDS)
+    except Exception as e:
+        FailureRegistry.record("BACKGROUND_WORKER_UNHANDLED", f"Unhandled error in background worker: {e}", "ERROR", extra={"error": str(e)})
+        
+    finally:
+        # Explicit cleanup of memory references
+        gc.collect()

@@ -21,7 +21,19 @@ async def list_models():
 
 @router.post("/predict", response_model=list[CustomerPredictionDTO])
 async def predict_customer(customer_id: str, db: AsyncSession = Depends(get_db)):
-    """Generates a new feature snapshot and runs inference for a customer."""
+    """Generates a new feature snapshot and runs inference for a customer (or serves cached predictions in SERVING mode)."""
+    from core.config.settings import settings
+    if settings.RUNTIME_MODE == "SERVING":
+        repo = PredictionRepository(db)
+        predictions = await repo.get_customer_predictions(customer_id)
+        latest_preds = {}
+        # Keep only the latest prediction for each type
+        for p in predictions:
+            ptype = p.prediction_type.value if hasattr(p.prediction_type, 'value') else p.prediction_type
+            if ptype not in latest_preds:
+                latest_preds[ptype] = p
+        return list(latest_preds.values())
+
     try:
         # 1. Generate snapshot
         snapshot = await generate_snapshot(customer_id, db)

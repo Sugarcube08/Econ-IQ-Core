@@ -12,22 +12,27 @@ from core.storage.redis import redis_manager
 
 
 async def start_sync_worker():
-    logger.info("WORKER | Starting background event sync worker loop")
+    from core.config.settings import settings
+    logger.info(f"WORKER | Starting event sync worker (mode={settings.RUNTIME_MODE})")
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("WORKER | Sync worker is disabled in SERVING mode.")
+        return
+
     sync_pipeline = SyncPipeline()
-    while True:
-        try:
-            await sync_pipeline.run_cycle()
-            FailureRegistry.recover("BACKGROUND_SYNC_WORKER_UNHANDLED")
-        except asyncio.CancelledError:
-            logger.info("WORKER | Background sync worker cancelled")
-            break
-        except Exception as e:
-            FailureRegistry.record("BACKGROUND_SYNC_WORKER_UNHANDLED", f"Unhandled error in background sync worker: {e}", "ERROR", extra={"error": str(e)})
-        await asyncio.sleep(10)
+    try:
+        await sync_pipeline.run_cycle()
+        FailureRegistry.recover("BACKGROUND_SYNC_WORKER_UNHANDLED")
+    except Exception as e:
+        FailureRegistry.record("BACKGROUND_SYNC_WORKER_UNHANDLED", f"Unhandled error in background sync worker: {e}", "ERROR", extra={"error": str(e)})
 
 async def main():
     setup_logging()
     logger.info("WORKER | Initializing econiq worker process")
+
+    from core.config.settings import settings
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("WORKER | Runtime mode is set to SERVING. Background workers are disabled. Exiting worker process.")
+        sys.exit(0)
 
     # Connect to Redis
     await redis_manager.connect()

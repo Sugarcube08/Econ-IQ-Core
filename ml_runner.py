@@ -7,6 +7,11 @@ from core.ml.prediction_service import MLPredictionService
 
 
 async def main():
+    from core.config.settings import settings
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("ML | Runtime mode is set to SERVING. ML pipelines are disabled. Exiting ML runner.")
+        sys.exit(0)
+
     from core.storage.postgres import wait_for_db_tables
     if not await wait_for_db_tables(timeout=30):
         logger.error("ML | Database schema is not ready. Exiting.")

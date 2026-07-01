@@ -35,6 +35,86 @@ class RecommendationRulesEngine:
                 customer_id=customer_id, generated_date=datetime.now(UTC).date(), recommendations=[]
             )
 
+        from core.config.settings import settings
+        if settings.RUNTIME_MODE == "SERVING":
+            # Fetch all ACTIVE recommendations from DB to return
+            stmt = select(Recommendation).where(
+                Recommendation.customer_id == customer_id, Recommendation.status == "ACTIVE"
+            )
+            res = await session.execute(stmt)
+            db_recs = res.scalars().all()
+
+            recommendations = []
+            for r in db_recs:
+                rec_type = RecommendationType.CREDIT_LIMIT
+                action_cat = "MAINTAIN_CREDIT_LIMIT"
+                priority = "LOW"
+                impact = "LOW"
+                val = None
+                affected_score = "credit_score"
+
+                if r.recommendation_type == "HIGH_GROWTH_OPPORTUNITY":
+                    rec_type = RecommendationType.CREDIT_LIMIT
+                    action_cat = "INCREASE_CREDIT_LIMIT"
+                    val = "20% Increase"
+                    priority = "MEDIUM"
+                    impact = "HIGH"
+                    affected_score = "growth_score"
+                elif r.recommendation_type == "INCREASE_CREDIT":
+                    rec_type = RecommendationType.CREDIT_LIMIT
+                    action_cat = "INCREASE_CREDIT_LIMIT"
+                    val = "10% Increase"
+                    priority = "MEDIUM"
+                    impact = "MEDIUM"
+                    affected_score = "trust_score"
+                elif r.recommendation_type == "MAINTAIN_CREDIT":
+                    rec_type = RecommendationType.CREDIT_LIMIT
+                    action_cat = "MAINTAIN_CREDIT_LIMIT"
+                    val = "No Change"
+                    priority = "LOW"
+                    impact = "LOW"
+                    affected_score = "credit_score"
+                elif r.recommendation_type == "REVIEW_ACCOUNT":
+                    rec_type = RecommendationType.CREDIT_LIMIT
+                    action_cat = "MAINTAIN_CREDIT_LIMIT"
+                    val = "Needs Review"
+                    priority = "MEDIUM"
+                    impact = "MEDIUM"
+                    affected_score = "health_score"
+                elif r.recommendation_type == "REDUCE_EXPOSURE":
+                    rec_type = RecommendationType.CREDIT_LIMIT
+                    action_cat = "DECREASE_CREDIT_LIMIT"
+                    val = "20% Decrease"
+                    priority = "HIGH"
+                    impact = "HIGH"
+                    affected_score = "risk_score"
+                elif r.recommendation_type == "IMMEDIATE_COLLECTION":
+                    rec_type = RecommendationType.COLLECTION_STRATEGY
+                    action_cat = "ACCELERATED_COLLECTION"
+                    val = "Immediate"
+                    priority = "CRITICAL"
+                    impact = "HIGH"
+                    affected_score = "collection_score"
+
+                recommendations.append(
+                    ActionRecommendation(
+                        type=rec_type,
+                        priority=priority,
+                        reason=r.reason,
+                        affected_score=affected_score,
+                        expected_impact=impact,
+                        confidence=r.confidence,
+                        action_category=action_cat,
+                        value=val,
+                    )
+                )
+
+            return CustomerRecommendations(
+                customer_id=customer_id,
+                generated_date=datetime.now(UTC).date(),
+                recommendations=recommendations,
+            )
+
         # Load active policy thresholds from Registry
         from core.ml.policies.policy_service import PolicyService
         policy_svc = PolicyService(session)

@@ -160,15 +160,15 @@ async def run_ml_pipeline_cycle() -> None:
 
 async def start_ml_worker_loop(interval_seconds: int = 86400) -> None:
     """
-    Runs the ML Pipeline worker loop indefinitely, sleeping for the configured interval (default 24h).
+    Runs the ML Pipeline worker loop (runs exactly once per invocation, respecting RUNTIME_MODE).
     """
-    logger.info(f"ML | Starting background ML worker loop (interval={interval_seconds}s)")
-    while True:
-        try:
-            await run_ml_pipeline_cycle()
-        except asyncio.CancelledError:
-            logger.info("ML | Background ML worker loop cancelled.")
-            break
-        except Exception as e:
-            logger.error(f"ML | Unhandled exception in ML worker cycle: {e}")
-        await asyncio.sleep(interval_seconds)
+    from core.config.settings import settings
+    logger.info(f"ML | Starting background ML worker loop (mode={settings.RUNTIME_MODE})")
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("ML | ML worker loop is disabled in SERVING mode.")
+        return
+
+    try:
+        await run_ml_pipeline_cycle()
+    except Exception as e:
+        logger.error(f"ML | Unhandled exception in ML worker cycle: {e}")

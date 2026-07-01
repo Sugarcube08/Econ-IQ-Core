@@ -1881,9 +1881,27 @@ async def get_customer_summary(
                 "outstanding_current": intel.outstanding_current or 0.0
             }
 
-    shap_service = SHAPService()
-    distress_explanation = shap_service.explain_prediction(features, model_type="distress")
-    risk_drivers = distress_explanation.get("top_factors", ["payment_delay_avg", "outstanding_ratio", "trust_direction", "current_state"])
+    from core.config.settings import settings
+    if settings.RUNTIME_MODE == "SERVING":
+        from core.models.state_models import CustomerPrediction
+        stmt_pred = (
+            select(CustomerPrediction)
+            .where(CustomerPrediction.customer_id == customer_id)
+            .where(CustomerPrediction.prediction_type == "DISTRESS")
+            .order_by(CustomerPrediction.generated_at.desc())
+            .limit(1)
+        )
+        res_pred = await db.execute(stmt_pred)
+        pred_obj = res_pred.scalars().first()
+        if pred_obj and pred_obj.metadata_json and "top_factors" in pred_obj.metadata_json:
+            risk_drivers = pred_obj.metadata_json["top_factors"]
+        else:
+            risk_drivers = ["outstanding_ratio", "credit_utilization", "current_state", "trust_direction"]
+    else:
+        shap_service = SHAPService()
+        distress_explanation = shap_service.explain_prediction(features, model_type="distress")
+        risk_drivers = distress_explanation.get("top_factors", ["payment_delay_avg", "outstanding_ratio", "trust_direction", "current_state"])
+    
     risk_drivers = [str(d).upper() for d in risk_drivers]
 
     # 4. Generate Growth Signals dynamically

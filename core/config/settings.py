@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "econiq Intelligence Backend"
     APP_ENV: str = "development"
+    RUNTIME_MODE: str = Field("SERVING", validation_alias="RUNTIME_MODE")
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
 

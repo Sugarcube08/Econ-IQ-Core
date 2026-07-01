@@ -38,20 +38,20 @@ from core.storage.redis import redis_manager
 
 async def start_sync_worker():
     """
-    Main background loop that periodically checks and runs the event sync pipeline.
+    Runs the event sync pipeline once (respects RUNTIME_MODE).
     """
-    logger.info("SYSTEM | Starting background event sync worker")
+    from core.config.settings import settings
+    logger.info(f"SYSTEM | Starting background event sync worker (mode={settings.RUNTIME_MODE})")
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.warning("SYSTEM | Sync worker is disabled in SERVING mode.")
+        return
+
     sync_pipeline = SyncPipeline()
-    while True:
-        try:
-            await sync_pipeline.run_cycle()
-            FailureRegistry.recover("BACKGROUND_SYNC_WORKER_UNHANDLED")
-        except asyncio.CancelledError:
-            logger.info("SYSTEM | Background sync worker cancelled")
-            break
-        except Exception as e:
-            FailureRegistry.record("BACKGROUND_SYNC_WORKER_UNHANDLED", f"Unhandled error in background sync worker: {e}", "ERROR", extra={"error": str(e)})
-        await asyncio.sleep(10)
+    try:
+        await sync_pipeline.run_cycle()
+        FailureRegistry.recover("BACKGROUND_SYNC_WORKER_UNHANDLED")
+    except Exception as e:
+        FailureRegistry.record("BACKGROUND_SYNC_WORKER_UNHANDLED", f"Unhandled error in background sync worker: {e}", "ERROR", extra={"error": str(e)})
 
 
 @asynccontextmanager
@@ -66,6 +66,82 @@ async def lifespan(app: FastAPI):
     # Initialize Ingestion Schema (Sync Service Logic)
     sync_pipeline = SyncPipeline()
     app.state.sync_pipeline = sync_pipeline
+
+    if settings.RUNTIME_MODE == "SERVING":
+        logger.info("SYSTEM | Running in SERVING Mode")
+        # 1. Connect to Redis (Fail-Closed) if REDIS_URL is configured
+        await redis_manager.connect()
+
+        # 2. Database reachable validation and artifact checks
+        cust_count = 0
+        snap_count = 0
+        pred_count = 0
+        try:
+            from sqlalchemy import text
+            async with AsyncSessionLocal() as session:
+                # Ping DB
+                await session.execute(text("SELECT 1"))
+                
+                # Check customers exist
+                cust_res = await session.execute(text("SELECT COUNT(*) FROM customers"))
+                cust_count = cust_res.scalar() or 0
+                
+                # Check feature snapshots exist
+                snap_res = await session.execute(text("SELECT COUNT(*) FROM feature_snapshots"))
+                snap_count = snap_res.scalar() or 0
+                
+                # Check predictions exist
+                pred_res = await session.execute(text("SELECT COUNT(*) FROM customer_predictions"))
+                pred_count = pred_res.scalar() or 0
+        except Exception as e:
+            logger.error(f"SYSTEM | Startup verification failed: Database is unreachable or schema is missing: {e}")
+            raise RuntimeError(f"Database verification failed: {e}") from e
+
+        # Check models exist
+        import os
+        models_dir = "models"
+        model_files = []
+        if os.path.exists(models_dir):
+            model_files = [f for f in os.listdir(models_dir) if f.endswith(".pkl")]
+        
+        # Verify required artifact existence
+        if cust_count == 0 or snap_count == 0 or pred_count == 0:
+            logger.warning(f"SYSTEM | Warning: Static data missing or incomplete! Customers: {cust_count}, Snapshots: {snap_count}, Predictions: {pred_count}")
+        else:
+            logger.info("SYSTEM | Startup verification passed: database, snapshots, predictions are verified.")
+
+        # Consolidate Startup Logging
+        summary = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ECONIQ SERVING MODE
+
+Customers .......... {cust_count}
+Feature Snapshots .. {snap_count}
+Predictions ........ {pred_count}
+Recommendations .... Ready
+SHAP ............... Ready
+
+Runtime Mode ....... SERVING
+
+Background Workers . Disabled
+Schedulers ......... Disabled
+
+API Status ......... Ready
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        logger.info(summary)
+        print(summary)
+
+        yield
+
+        # Shutdown Logic
+        logger.info("SYSTEM | Shutting down econiq Backend")
+        await redis_manager.disconnect()
+        await engine.dispose()
+        logger.info("SYSTEM | Shutdown complete")
+        return
 
     # Initialize Persistence
     # Skip all schema mutations in production; only run read-only validation

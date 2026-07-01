@@ -175,6 +175,39 @@ async def generate_predictions_for_snapshot(
         confidence = float(value * model_quality * label_quality * sample_density)
         confidence = round(confidence, 4)
 
+        # Precompute SHAP top factors
+        top_factors = []
+        if pred_type.value in ["CHURN", "DELINQUENCY", "DISTRESS"]:
+            try:
+                from core.ml.explainability.shap_service import SHAPService
+                shap_svc = SHAPService()
+                features_dict = {}
+                feature_cols = [
+                    "health_score", "risk_score", "trust_score", "billing_30d", "billing_90d", "billing_180d",
+                    "payments_30d", "payments_90d", "payments_180d", "returns_30d", "returns_90d",
+                    "purchase_gap", "purchase_frequency", "payment_delay_avg", "payment_delay_trend",
+                    "collection_efficiency", "outstanding_current", "outstanding_ratio", "credit_utilization"
+                ]
+                for col in feature_cols:
+                    val_col = getattr(snapshot, col, 0.0)
+                    if val_col is None:
+                        if col == "purchase_gap":
+                            val_col = 30.0
+                        elif col == "payment_delay_avg":
+                            val_col = 0.0
+                        elif col in ["trust_score", "health_score", "risk_score"]:
+                            val_col = 0.5
+                        elif col == "collection_efficiency":
+                            val_col = 1.0
+                        else:
+                            val_col = 0.0
+                    features_dict[col] = float(val_col)
+                
+                explanation = shap_svc.explain_prediction(features_dict, model_type=pred_type.value.lower())
+                top_factors = explanation.get("top_factors", [])
+            except Exception as e:
+                logger.error(f"ML | Failed to precompute SHAP for {customer_id} in {pred_type.value}: {e}")
+
         dto = CustomerPredictionDTO(
             prediction_id=str(uuid.uuid4()),
             customer_id=customer_id,
@@ -197,7 +230,8 @@ async def generate_predictions_for_snapshot(
                 "label_type": "semi_synthetic",
                 "snapshot_date": snapshot.snapshot_date.strftime("%Y-%m-%d") if hasattr(snapshot.snapshot_date, "strftime") else str(snapshot.snapshot_date),
                 "features_hash": getattr(snapshot, "feature_hash", "abcd1234") or "abcd1234",
-                "features": snapshot.model_dump(mode='json')
+                "features": snapshot.model_dump(mode='json'),
+                "top_factors": top_factors
             }
         )
 
